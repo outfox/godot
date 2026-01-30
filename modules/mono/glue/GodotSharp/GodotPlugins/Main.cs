@@ -83,6 +83,20 @@ namespace GodotPlugins
             AssemblyLoadContext.Default;
 
         private static DllImportResolver? _dllImportResolver;
+        private static bool _isInitialized;
+
+        private static void TrySetDllImportResolver(Assembly assembly, DllImportResolver resolver)
+        {
+            try
+            {
+                NativeLibrary.SetDllImportResolver(assembly, resolver);
+            }
+            catch (InvalidOperationException)
+            {
+                // A DllImportResolver has already been set for this assembly.
+                // This can happen when re-initializing in a LibGodot embedding scenario.
+            }
+        }
 
         // Right now we do it this way for simplicity as hot-reload is disabled. It will need to be changed later.
         [UnmanagedCallersOnly]
@@ -93,7 +107,30 @@ namespace GodotPlugins
         {
             try
             {
-                NativeFuncs.Initialize(unmanagedCallbacks, unmanagedCallbacksSize);
+                if (_isInitialized)
+                {
+                    // Re-initialization: just re-provide callbacks and managed callbacks.
+                    *pluginsCallbacks = new()
+                    {
+                        LoadProjectAssemblyCallback = &LoadProjectAssembly,
+                        LoadToolsAssemblyCallback = &LoadToolsAssembly,
+                        UnloadProjectPluginCallback = &UnloadProjectPlugin,
+                    };
+
+                    *managedCallbacks = ManagedCallbacks.Create();
+
+                    return godot_bool.True;
+                }
+
+                try
+                {
+                    NativeFuncs.Initialize(unmanagedCallbacks, unmanagedCallbacksSize);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Already initialized from a previous Godot instance in the same process.
+                }
+
                 Marshaling.Initialize();
 
                 _editorHint = editorHint.ToBool();
@@ -101,7 +138,7 @@ namespace GodotPlugins
                 _dllImportResolver = new GodotDllImportResolver(godotDllHandle).OnResolveDllImport;
 
                 SharedAssemblies.Add(CoreApiAssembly.GetName());
-                NativeLibrary.SetDllImportResolver(CoreApiAssembly, _dllImportResolver);
+                TrySetDllImportResolver(CoreApiAssembly, _dllImportResolver);
 
                 AlcReloadCfg.Configure(alcReloadEnabled: _editorHint);
 
@@ -109,7 +146,7 @@ namespace GodotPlugins
                 {
                     _editorApiAssembly = Assembly.Load("GodotSharpEditor");
                     SharedAssemblies.Add(_editorApiAssembly.GetName());
-                    NativeLibrary.SetDllImportResolver(_editorApiAssembly, _dllImportResolver);
+                    TrySetDllImportResolver(_editorApiAssembly, _dllImportResolver);
                 }
 
                 *pluginsCallbacks = new()
@@ -120,6 +157,8 @@ namespace GodotPlugins
                 };
 
                 *managedCallbacks = ManagedCallbacks.Create();
+
+                _isInitialized = true;
 
                 return godot_bool.True;
             }

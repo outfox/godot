@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Optimize>true</Optimize>
+    <IsTrimmable>true</IsTrimmable>
+    <VerifyReferenceTrimCompatibility>true</VerifyReferenceTrimCompatibility>
 
     <!-- To generate the .runtimeconfig.json file-->
     <EnableDynamicLoading>true</EnableDynamicLoading>
