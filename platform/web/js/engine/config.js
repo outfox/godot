@@ -172,6 +172,15 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		 */
 		pid: 0,
 		/**
+		 * Pass imports to dotnet.setModuleImports(key, value).
+		 *
+		 * @export
+		 * @memberof EngineConfig
+		 * @type {?Object}
+		 * @default
+		 */
+		dotnetModuleImports: null,
+		/**
 		 * A callback function for handling Godot's ``OS.execute`` calls.
 		 *
 		 * This is for example used in the Web Editor template to switch between Project Manager and editor, and for running the game.
@@ -306,6 +315,9 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 	 * @return {!Object}
 	 */
 	Config.prototype.getModuleConfig = function (loadPath, response) {
+		// Extract directory path if it exists.
+		const dirPath = loadPath.split('/').slice(0, -1).join('/');
+
 		let r = response;
 		const gdext = this.gdextensionLibs;
 		return {
@@ -330,23 +342,35 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 				return {};
 			},
 			'locateFile': function (path) {
-				if (!path.startsWith('godot.')) {
-					return path;
-				} else if (path.endsWith('.audio.worklet.js')) {
-					return `${loadPath}.audio.worklet.js`;
-				} else if (path.endsWith('.audio.position.worklet.js')) {
-					return `${loadPath}.audio.position.worklet.js`;
-				} else if (path.endsWith('.js')) {
-					return `${loadPath}.js`;
-				} else if (path in gdext) {
-					return path;
-				} else if (path.endsWith('.side.wasm')) {
-					return `${loadPath}.side.wasm`;
-				} else if (path.endsWith('.wasm')) {
-					return `${loadPath}.wasm`;
+				if (path.startsWith('godot.')) {
+					if (path.endsWith('.audio.worklet.js')) {
+						return `${loadPath}.audio.worklet.js`;
+					} else if (path.endsWith('.audio.position.worklet.js')) {
+						return `${loadPath}.audio.position.worklet.js`;
+					} else if (path.endsWith('.js')) {
+						return `${loadPath}.js`;
+					} else if (path in gdext) {
+						return path;
+					} else if (path.endsWith('.side.wasm')) {
+						return `${loadPath}.side.wasm`;
+					} else if (path.endsWith('.wasm')) {
+						return `${loadPath}.wasm`;
+					}
+				}
+				if (path.startsWith('dotnet.')) {
+					if (path === 'dotnet.native.wasm') {
+						return `${loadPath}.wasm`;
+					}
+					return `${dirPath}/_framework/${path}`;
 				}
 				return path;
 			},
+			'getPreloadedWasm': function () {
+				const tempResponse = r;
+				r = null;
+				return tempResponse;
+			},
+			'godotSharpImports': this.dotnetModuleImports,
 		};
 	};
 

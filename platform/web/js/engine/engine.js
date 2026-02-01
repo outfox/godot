@@ -177,10 +177,13 @@ const Engine = (function () {
 							me.rtenv['copyToFS'](file.path, file.buffer);
 						}
 						preloader.preloadedFiles.length = 0; // Clear memory
-						me.rtenv['callMain'](me.config.args);
-						initPromise = null;
-						me.installServiceWorker();
-						resolve();
+
+						// Adds optional support for custom async 'callMain'.
+						Promise.resolve(me.rtenv['callMain'](me.config.args)).then(function () {
+							initPromise = null;
+							me.installServiceWorker();
+							resolve();
+						});
 					});
 				});
 			},
@@ -284,6 +287,19 @@ const Engine = (function () {
 					} catch (e) {
 						return Promise.reject(e);
 					}
+				}
+				return Promise.resolve();
+			},
+
+			/**
+			 * Get [JsExport] methods.
+			 *
+			 * @export
+			 * @returns {Promise} The exports promise.
+			 */
+			getDotnetExports: function () {
+				if (this.rtenv && this.rtenv['getGodotSharpExports']) {
+					return this.rtenv['getGodotSharpExports']();
 				}
 				return Promise.resolve();
 			},
