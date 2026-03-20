@@ -8688,4 +8688,6 @@ DisplayServerWindows::~DisplayServerWindows() {
 	memdelete(tts);
 
 	OleUninitialize();
+
+	UnregisterClassW(wc.lpszClassName, wc.hInstance);
 }
