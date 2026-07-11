@@ -31,6 +31,7 @@
 #include "class_db.h"
 
 #include "core/config/engine.h"
+#include "core/core_globals.h"
 #include "core/object/ref_counted.h"
 #include "core/templates/sort_array.h"
 #include "core/version.h"
@@ -2051,6 +2052,15 @@ void ClassDB::cleanup_defaults() {
 LocalVector<GDType **> ClassDB::gdtype_autorelease_pool;
 void ClassDB::cleanup() {
 	//OBJTYPE_LOCK; hah not here
+
+	if (CoreGlobals::engine_reinit_enabled) {
+		// Keep class metadata (ClassInfo, MethodBinds, GDTypes) alive across
+		// engine reinitializations: GDCLASS initialize_class() guards are
+		// function-local statics that only run once per process, so wiping
+		// the class table would leave the next instance without registered
+		// classes. Re-registration on the next setup is idempotent.
+		return;
+	}
 
 	for (KeyValue<StringName, ClassInfo> &E : classes) {
 		if (E.value.gdextension) {

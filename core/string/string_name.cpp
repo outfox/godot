@@ -30,6 +30,7 @@
 
 #include "string_name.h"
 
+#include "core/core_globals.h"
 #include "core/os/mutex.h"
 #include "core/os/os.h"
 #include "core/string/print_string.h"
@@ -58,6 +59,11 @@ PagedAllocator<StringName::_Data> StringName::Table::allocator;
 bool StringName::Table::configured = false;
 
 void StringName::setup() {
+	if (CoreGlobals::engine_reinit_enabled && Table::configured) {
+		// The table is kept alive across engine reinitializations so that
+		// statically cached StringNames stay valid.
+		return;
+	}
 	ERR_FAIL_COND(Table::configured);
 	for (uint32_t i = 0; i < Table::TABLE_LEN; i++) {
 		Table::table[i] = nullptr;
@@ -66,6 +72,11 @@ void StringName::setup() {
 }
 
 void StringName::cleanup() {
+	if (CoreGlobals::engine_reinit_enabled) {
+		// Keep the table (and all interned names) alive so the engine can be
+		// reinitialized in this process; the OS reclaims it at process exit.
+		return;
+	}
 	MutexLock lock(Table::mutex);
 
 #ifdef DEBUG_ENABLED
@@ -131,7 +142,10 @@ void StringName::unref() {
 	if (_data && _data->refcount.unref()) {
 		MutexLock lock(Table::mutex);
 
-		if (CoreGlobals::leak_reporting_enabled && _data->static_count.get() > 0) {
+		if (CoreGlobals::leak_reporting_enabled && _data->static_count.get() > 0 && !CoreGlobals::engine_reinit_enabled) {
+			// With engine reinitialization the static count legitimately
+			// accumulates across engine instances, so this check would
+			// produce false positives during process teardown.
 			ERR_PRINT("BUG: Unreferenced static string to 0: " + _data->name);
 		}
 		if (_data->prev) {
