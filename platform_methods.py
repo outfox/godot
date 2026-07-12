@@ -59,7 +59,7 @@ def validate_arch(arch, platform_name, supported_arches):
 def get_build_version(short):
     import version
 
-    name = "custom_build"
+    name = "2dog"
     if os.getenv("BUILD_NAME") is not None:
         name = os.getenv("BUILD_NAME")
     v = f"{version.major}.{version.minor}"
