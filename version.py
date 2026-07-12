@@ -5,5 +5,5 @@ minor = 8
 patch = 0
 status = "beta"
 module_config = ""
-website = "https://godotengine.org"
+website = "https://2dog.dev"
 docs = "latest"
