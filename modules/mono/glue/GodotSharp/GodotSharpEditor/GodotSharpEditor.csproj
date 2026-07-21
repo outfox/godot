@@ -10,6 +10,8 @@
     <EnableDefaultItems>false</EnableDefaultItems>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Optimize>true</Optimize>
+    <!-- 2dog: generated editor API bindings hold no reflection; trim-safe as generated. -->
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
   <PropertyGroup>
     <Description>Godot C# Editor API.</Description>

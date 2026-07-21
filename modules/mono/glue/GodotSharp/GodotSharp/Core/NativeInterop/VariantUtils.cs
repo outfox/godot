@@ -4,6 +4,7 @@
 
 using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Godot.Collections;
 
 
@@ -247,32 +248,31 @@ namespace Godot.NativeInterop
             return CreateFromPackedColorArray(nativePackedArray);
         }
 
+        // 2dog: a null array implicitly converts to a default span; this distinguishes it from a
+        // genuinely empty array (CA2265-clean replacement for the previous `span == null` checks).
+        private static bool IsSpanFromNullArray<T>(scoped Span<T> span) =>
+            span.IsEmpty && Unsafe.IsNullRef(ref MemoryMarshal.GetReference(span));
+
         public static godot_variant CreateFromSystemArrayOfStringName(scoped Span<StringName> from)
         {
-#pragma warning disable CA2265 // Comparing a span to 'null' might be redundant.
-            if (from == null)
+            if (IsSpanFromNullArray(from))
                 return default;
-#pragma warning restore CA2265
             using var fromGodot = new Collections.Array(from);
             return CreateFromArray((godot_array)fromGodot.NativeValue);
         }
 
         public static godot_variant CreateFromSystemArrayOfNodePath(scoped Span<NodePath> from)
         {
-#pragma warning disable CA2265 // Comparing a span to 'null' might be redundant.
-            if (from == null)
+            if (IsSpanFromNullArray(from))
                 return default;
-#pragma warning restore CA2265
             using var fromGodot = new Collections.Array(from);
             return CreateFromArray((godot_array)fromGodot.NativeValue);
         }
 
         public static godot_variant CreateFromSystemArrayOfRid(scoped Span<Rid> from)
         {
-#pragma warning disable CA2265 // Comparing a span to 'null' might be redundant.
-            if (from == null)
+            if (IsSpanFromNullArray(from))
                 return default;
-#pragma warning restore CA2265
             using var fromGodot = new Collections.Array(from);
             return CreateFromArray((godot_array)fromGodot.NativeValue);
         }
