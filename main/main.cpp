@@ -750,7 +750,7 @@ Error Main::test_setup() {
 	register_early_core_singletons();
 	initialize_modules(MODULE_INITIALIZATION_LEVEL_CORE);
 	register_core_extensions();
-	gd_extension_load_extensions(); // Load GDExtensions that are not embedded
+	gd_extension_load_extensions(); // 2dog: load non-embedded GDExtensions.
 
 	register_core_singletons();
 
@@ -2090,7 +2090,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 
 	register_early_core_singletons();
 	initialize_modules(MODULE_INITIALIZATION_LEVEL_CORE);
-	register_core_extensions(); // core extensions registered really early for embedded extensions to override the project settings
+	register_core_extensions(); // 2dog: embedded extensions can override project settings.
 
 	OS::get_singleton()->_in_editor = editor;
 	if (globals->setup(project_path, main_pack, false, editor) == OK) {
@@ -2273,7 +2273,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 		OS::get_singleton()->_verbose_stdout = GLOBAL_GET("debug/settings/stdout/verbose_stdout");
 	}
 
-	gd_extension_load_extensions(); // Load GDExtensions that are not embedded
+	gd_extension_load_extensions(); // 2dog: load non-embedded GDExtensions.
 
 	if (!editor) {
 		ResourceUID::get_singleton()->enable_reverse_cache();
@@ -4803,7 +4803,7 @@ int Main::start() {
 			Crypto::load_default_certificates(GLOBAL_GET("network/tls/certificate_bundle_override"));
 
 			if (CoreGlobals::run_global_world_init_function()) {
-				// World initialized by LibGodot callback — skip scene loading.
+				// 2dog: the libgodot host initialized the world, so skip scene loading.
 			} else if (!game_path.is_empty()) {
 				Node *scene = nullptr;
 				Ref<PackedScene> scenedata = ResourceLoader::load(local_game_path);
@@ -5446,8 +5446,7 @@ void Main::cleanup(bool p_force) {
 	unregister_core_types();
 
 	if (CoreGlobals::engine_reinit_enabled) {
-		// The audio drivers registered by the OS instance are owned by it and
-		// die with it; drop them so the next instance re-registers its own.
+		// 2dog: OS-owned audio drivers must be re-registered by the next engine instance.
 		AudioDriverManager::reset();
 	}
 

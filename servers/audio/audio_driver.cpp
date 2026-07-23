@@ -211,9 +211,10 @@ int AudioDriverManager::get_driver_count() {
 }
 
 void AudioDriverManager::reset() {
-	// Drop all registered drivers (they are owned by the OS instance, which is
-	// destroyed on engine reinitialization) and restore the initial state with
-	// only the dummy driver.
+	// 2dog: discard OS-owned drivers before an engine restart, retaining only the dummy driver.
+	for (int i = 1; i < MAX_DRIVERS; i++) {
+		drivers[i] = nullptr;
+	}
 	drivers[0] = &AudioDriverManager::dummy_driver;
 	driver_count = 1;
 }

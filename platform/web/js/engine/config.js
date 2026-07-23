@@ -315,7 +315,6 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 	 * @return {!Object}
 	 */
 	Config.prototype.getModuleConfig = function (loadPath, response) {
-		// Extract directory path if it exists.
 		const dirPath = loadPath.split('/').slice(0, -1).join('/');
 
 		let r = response;
