@@ -127,12 +127,6 @@ def configure(env: "SConsEnvironment"):
         print_error("Godot with dlink+threads requires Emscripten 6.0.12+. Detected: {}.{}.{}".format(*cc_semver))
         sys.exit(255)
 
-    if cc_semver < (4, 0, 0):
-        print_warning(
-            "The Emscripten version for C# is %s.%s.%s while minimum supported version to build "
-            "Godot is 4.0.0, export is experimental." % cc_semver
-        )
-
     env.Append(LIBEMITTER=[library_emitter])
 
     env["EXPORTED_FUNCTIONS"] = []

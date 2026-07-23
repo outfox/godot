@@ -6777,8 +6777,7 @@ bool EditorNode::is_cmdline_mode() {
 
 void EditorNode::cleanup() {
 	_init_callbacks.clear();
-	// Add-only accumulators, reset for engine reinitialization (libgodot
-	// restart) so plugins re-registering on the next cycle start from zero.
+	// 2dog: reset add-only plugin counters before an engine restart.
 	build_callback_count = 0;
 	plugin_init_callback_count = 0;
 }

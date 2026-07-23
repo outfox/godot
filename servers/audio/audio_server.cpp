@@ -1484,12 +1484,7 @@ void AudioServer::finish() {
 		AudioDriverManager::get_driver(i)->finish();
 	}
 
-	// 2dog: streams still playing at quit sit in playback_list holding refs to
-	// their AudioStreamPlayback (and through it the stream resource); their
-	// deferred deletion needs mix steps that will never run again, so they
-	// leak past ObjectDB::cleanup. Drivers are finished (no mix thread), so
-	// drain the list now. _cleanup_lists twice: the bus-details graveyard
-	// frees one call behind.
+	// 2dog: after drivers stop, drain deferred playback deletion and both graveyard generations.
 	for (AudioStreamPlaybackListNode *playback : playback_list) {
 		_delete_stream_playback_list_node(playback);
 	}

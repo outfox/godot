@@ -3173,9 +3173,7 @@ void EditorHelp::load_script_doc_cache() {
 		return;
 	}
 
-	// EditorNode may already be destroyed when this runs as a deferred call
-	// during shutdown (fast --import runs); is_cmdline_mode() would then
-	// ERR_FAIL to false and let editor-only work start mid-teardown.
+	// 2dog: deferred calls may run after EditorNode is destroyed during fast --import shutdown.
 	if (!EditorNode::get_singleton() || EditorNode::is_cmdline_mode()) {
 		return;
 	}
@@ -3246,7 +3244,7 @@ static void _regenerate_script_doc_cache(bool p_changes) {
 
 void EditorHelp::regenerate_script_doc_cache() {
 	if (!EditorFileSystem::get_singleton()) {
-		return; // Shutting down.
+		return;
 	}
 	if (EditorFileSystem::get_singleton()->is_scanning()) {
 		// Wait until EditorFileSystem scanning is complete to use updated filesystem structure.
