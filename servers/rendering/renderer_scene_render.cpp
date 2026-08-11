@@ -59,6 +59,18 @@ void RendererSceneRender::CameraData::set_multiview_camera(const Transform3D &p_
 	is_orthogonal = p_is_orthogonal;
 	vaspect = p_vaspect;
 
+	// 2dog: mono-preview XR emulators report two identical eye views (no IPD offset); the
+	// combined-frustum derivation below degenerates for those, so use the first view directly.
+	if (p_offsets[0].is_equal_approx(p_offsets[1]) && p_projections[0] == p_projections[1]) {
+		main_transform = p_transform * p_offsets[0];
+		main_projection = p_projections[0];
+		for (uint32_t v = 0; v < view_count; v++) {
+			view_offset[v] = Transform3D();
+			view_projection[v] = p_projections[v];
+		}
+		return;
+	}
+
 	main_transform = p_transform;
 	main_projection = Projection::create_combined_projection(p_transform, p_projections[0], p_offsets[0], p_projections[1], p_offsets[1]);
 
