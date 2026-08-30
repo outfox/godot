@@ -756,7 +756,10 @@ const _GodotAudio = {
 			let closed = Promise.resolve();
 			if (GodotAudio.driver) {
 				closed = GodotAudio.driver.close();
+				GodotAudio.driver = null; // 2dog: the next engine lifetime creates its own.
 			}
+			GodotAudio.audioPositionWorkletPromise = null;
+			GodotAudio.audioPositionWorkletNodes = [];
 			closed.then(function () {
 				return ctx.close();
 			}).then(function () {
@@ -1227,6 +1230,7 @@ const GodotAudioWorklet = {
 		close: function () {
 			return new Promise(function (resolve, reject) {
 				if (GodotAudioWorklet.promise === null) {
+					resolve(); // 2dog: nothing to stop; never leave the shutdown chain pending.
 					return;
 				}
 				const p = GodotAudioWorklet.promise;
@@ -1379,9 +1383,11 @@ const GodotAudioScript = {
 
 		close: function () {
 			return new Promise(function (resolve, reject) {
-				GodotAudioScript.script.disconnect();
-				GodotAudioScript.script.onaudioprocess = function () {};
-				GodotAudioScript.script = null;
+				if (GodotAudioScript.script) {
+					GodotAudioScript.script.disconnect();
+					GodotAudioScript.script.onaudioprocess = function () {};
+					GodotAudioScript.script = null;
+				}
 				resolve();
 			});
 		},
