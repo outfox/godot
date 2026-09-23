@@ -4556,6 +4556,10 @@ void DisplayServerWindows::process_events() {
 
 	_THREAD_SAFE_LOCK_
 
+	MSG msg = {};
+	// 2dog: an unfiltered peek prevents false window hangs after focus changes.
+	// Leave messages queued for batched raw input and throttled mouse motion.
+	PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE);
 	bool has_touch_events = process_raw_input();
 
 	DisplayServerEnums::WindowID window_id = _get_focused_window_or_popup();
@@ -4580,7 +4584,6 @@ void DisplayServerWindows::process_events() {
 	//   would split the WM_CHAR posted by TranslateMessage() from its
 	//   WM_KEYDOWN across frames, which breaks the pairing logic in
 	//   _process_key_events() and makes keys fire twice.
-	MSG msg = {};
 	auto peek_discrete = [&] {
 		BOOL ret = PeekMessageW(&msg, nullptr, 0, WM_NCMOUSEMOVE - 1, PM_REMOVE);
 		if (!ret) {
