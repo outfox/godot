@@ -681,7 +681,10 @@ void BaseButton::_bind_methods() {
 	BIND_THEME_ITEM(Theme::DATA_TYPE_SOUND, BaseButton, hover_sound);
 	BIND_THEME_ITEM(Theme::DATA_TYPE_SOUND, BaseButton, pressed_sound);
 	BIND_THEME_ITEM(Theme::DATA_TYPE_SOUND, BaseButton, pressed_disabled_sound);
+}
 
+// 2dog: register settings per engine instance because _bind_methods() runs only once.
+void BaseButton::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "gui/timers/button_shortcut_feedback_highlight_time", PROPERTY_HINT_RANGE, "0.01,10,0.01,suffix:s"), 0.2);
 }
 

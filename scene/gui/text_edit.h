@@ -855,6 +855,8 @@ public:
 			}
 		}
 	}
+	// 2dog: register project settings for each engine instance.
+	static void register_settings();
 
 	/* General overrides. */
 	virtual void unhandled_key_input(const Ref<InputEvent> &p_event) override;

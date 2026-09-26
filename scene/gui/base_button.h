@@ -102,6 +102,9 @@ protected:
 	GDVIRTUAL1(_toggled, bool)
 
 public:
+	// 2dog: register project settings for each engine instance.
+	static void register_settings();
+
 	enum DrawMode {
 		DRAW_NORMAL,
 		DRAW_PRESSED,
