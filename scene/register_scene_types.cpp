@@ -448,6 +448,8 @@ void register_scene_types() {
 	OS::get_singleton()->yield(); // may take time to init
 
 	GDREGISTER_CLASS(Node);
+	// 2dog: ProjectSettings is recreated on restart, so register these settings per instance (also below).
+	Node::register_settings();
 	GDREGISTER_CLASS(MissingNode);
 	GDREGISTER_ABSTRACT_CLASS(InstancePlaceholder);
 
@@ -484,6 +486,9 @@ void register_scene_types() {
 
 	GDREGISTER_CLASS(Control);
 	GDREGISTER_VIRTUAL_CLASS(BaseButton);
+	if constexpr (GD_IS_CLASS_ENABLED(BaseButton)) {
+		BaseButton::register_settings();
+	}
 	GDREGISTER_CLASS(Button);
 	GDREGISTER_CLASS(Label);
 	GDREGISTER_VIRTUAL_CLASS(Range);
@@ -522,6 +527,9 @@ void register_scene_types() {
 	GDREGISTER_CLASS(GridContainer);
 	GDREGISTER_CLASS(CenterContainer);
 	GDREGISTER_CLASS(ScrollContainer);
+	if constexpr (GD_IS_CLASS_ENABLED(ScrollContainer)) {
+		ScrollContainer::register_settings();
+	}
 	GDREGISTER_CLASS(PanelContainer);
 	GDREGISTER_CLASS(FlowContainer);
 	GDREGISTER_CLASS(HFlowContainer);
@@ -548,6 +556,9 @@ void register_scene_types() {
 	GDREGISTER_CLASS(Tree);
 
 	GDREGISTER_CLASS(TextEdit);
+	if constexpr (GD_IS_CLASS_ENABLED(TextEdit)) {
+		TextEdit::register_settings();
+	}
 	GDREGISTER_CLASS(CodeEdit);
 	GDREGISTER_CLASS(SyntaxHighlighter);
 	GDREGISTER_CLASS(CodeHighlighter);
