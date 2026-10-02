@@ -46,8 +46,7 @@ struct StringName::Table {
 	static _Data *table[TABLE_LEN];
 	static bool configured;
 
-	// 2dog: keep the table lock and allocator alive for static StringNames across engine restarts.
-	// Leaking function-local pointers also avoids cross-translation-unit destruction ordering.
+	// 2dog: retain the StringName lock and allocator across restarts and static destruction.
 	static BinaryMutex &mutex() {
 		static BinaryMutex *m = memnew(BinaryMutex);
 		return *m;

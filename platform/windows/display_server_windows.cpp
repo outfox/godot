@@ -4558,7 +4558,7 @@ void DisplayServerWindows::process_events() {
 
 	MSG msg = {};
 	// 2dog: an unfiltered peek prevents false window hangs after focus changes.
-	// Leave messages queued for batched raw input and throttled mouse motion.
+	// 2dog: Leave messages queued for batched raw input and throttled mouse motion.
 	PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE);
 	bool has_touch_events = process_raw_input();
 
