@@ -208,6 +208,9 @@ opts.Add(BoolVariable("vulkan", "Enable the Vulkan rendering driver", True))
 opts.Add(BoolVariable("opengl3", "Enable the OpenGL/GLES3 rendering driver", True))
 opts.Add(BoolVariable("d3d12", "Enable the Direct3D 12 rendering driver on supported platforms", False))
 opts.Add(BoolVariable("metal", "Enable the Metal rendering driver on supported platforms (Apple arm64 only)", False))
+opts.Add(("webgpu_port", "Emdawnwebgpu port (auto uses the vendored version) or local .py path", "auto"))
+opts.Add(BoolVariable("webgpu_precompile", "Precompile WebGPU shaders with host Tint and glslang", sys.platform != "win32"))
+opts.Add(BoolVariable("webgpu", "Enable the WebGPU rendering driver on supported platforms", False))
 opts.Add(BoolVariable("use_volk", "Use the volk library to load the Vulkan loader dynamically", True))
 opts.Add(BoolVariable("accesskit", "Enable the AccessKit driver for screen reader support", True))
 opts.Add(BoolVariable("angle", "Enable the ANGLE rendering driver for OpenGL ES 3.0 on supported platforms", True))
@@ -713,8 +716,12 @@ if env["scu_build"]:
 
     methods.set_scu_folders(scu_builders.generate_scu_files(max_includes_per_scu))
 
+# 2dog: the WebGPU driver brings RenderingDevice to the web platform.
+if env["platform"] == "web" and env["webgpu"]:
+    env["rendering_device"] = True
+
 if env["rendering_device"]:
-    if env["platform"] == "web":
+    if env["platform"] == "web" and not env["webgpu"]:
         # Not available in the web platform.
         env["rendering_device"] = False
     else:
@@ -728,6 +735,7 @@ if not env["rendering_device"] or not (env["forward_mobile_renderer"] or env["fo
     env["d3d12"] = False
     env["metal"] = False
     env["vulkan"] = False
+    env["webgpu"] = False
 
 # Must happen after the flags' definition, as configure is when most flags
 # are actually handled to change compile options, etc.

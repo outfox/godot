@@ -138,6 +138,31 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 		 */
 		gdextensionLibs: [],
 		/**
+		 * The rendering driver to use. Set by Godot export based on project settings.
+		 *
+		 * ``'webgpu'`` will automatically request a WebGPU device before engine init.
+		 *
+		 * ``'opengl3'`` (or empty) uses WebGL 2.0.
+		 *
+		 * @export
+		 * @memberof EngineConfig
+		 * @default
+		 * @type {string}
+		 */
+		renderingDriver: '',
+		/**
+		 * A pre-initialized WebGPU device to pass to the Emscripten module.
+		 * Required for WebGPU rendering. Must be set before engine init.
+		 * If not provided and ``renderingDriver`` is ``'webgpu'``, one will be
+		 * requested automatically.
+		 *
+		 * @export
+		 * @memberof EngineConfig
+		 * @default
+		 * @type {?GPUDevice}
+		 */
+		preinitializedWebGPUDevice: null,
+		/**
 		 * @ignore
 		 * @export
 		 * @type {!Object<string, number>}
@@ -342,6 +367,8 @@ const InternalConfig = function (initConfig) { // eslint-disable-line no-unused-
 			'noExitRuntime': false,
 			'dynamicLibraries': [`${loadPath}.side.wasm`].concat(this.gdextensionLibs),
 			'emscriptenPoolSize': this.emscriptenPoolSize,
+			// WebGPU: pass pre-initialized device if provided (for emscripten_webgpu_get_device()).
+			...(this.preinitializedWebGPUDevice ? { 'preinitializedWebGPUDevice': this.preinitializedWebGPUDevice } : {}),
 			'instantiateWasm': function (imports, onSuccess) {
 				function done(result) {
 					onSuccess(result['instance'], result['module']);
