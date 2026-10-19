@@ -77,6 +77,12 @@ private:
 
 	bool is_focused = false;
 
+	// 2dog: libgodot hosts learn when the main loop started and when it asked to quit; the view renderer drives both.
+	void (*libgodot_started_callback)(void *) = nullptr;
+	void (*libgodot_quit_callback)(void *) = nullptr;
+	void *libgodot_callback_userdata = nullptr;
+	bool libgodot_quit_notified = false;
+
 	CGFloat _weight_to_ct(int p_weight) const;
 	CGFloat _stretch_to_ct(int p_stretch) const;
 	String _get_default_fontname(const String &p_font_name) const;
@@ -100,6 +106,9 @@ public:
 	void start();
 
 	virtual Error get_entropy(uint8_t *r_buffer, int p_bytes) override;
+	// 2dog: see libgodot_ios.h; both callbacks run on the main thread, the quit one at most once.
+	void set_libgodot_callbacks(void (*p_started)(void *), void (*p_quit_requested)(void *), void *p_userdata);
+
 	virtual void alert(const String &p_alert, const String &p_title = "ALERT!") override;
 
 	virtual Vector<String> get_system_fonts() const override;
