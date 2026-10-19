@@ -14,9 +14,9 @@ swift_file_names = list(map(lambda f: f.name, swift_files))
 mm_files = Glob("*.mm")
 mm_file_names = list(map(lambda f: f.name, mm_files))
 
-# 2dog: library builds add the entry points for apps that link the archive and own UIApplication.
-if env["library_type"] != "executable":
-    ios_lib.append("libgodot_ios.mm")
+# 2dog: only library builds add the entry points for apps that link the archive and own UIApplication.
+if env["library_type"] == "executable":
+    mm_file_names.remove("libgodot_ios.mm")
 
 env_ios = env.Clone()
 
@@ -35,6 +35,9 @@ swift_module = setup_swift_builder(
     bridging_header_filename,
     swift_file_names + additional_swift_file_names,
 )
+# 2dog: library builds compile app_ios.swift without its @main; the app that links the archive owns the entry point.
+if env["library_type"] != "executable":
+    env_ios.Append(SWIFTCFLAGS=["-D", "GODOT_LIBRARY"])
 
 # Enable module support
 env_ios.Append(CCFLAGS=["-fmodules", "-fcxx-modules"])
