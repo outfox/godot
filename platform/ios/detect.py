@@ -52,6 +52,8 @@ def get_opts():
             "Path to the AccessKit C SDK",
             os.path.join(deps_folder, "accesskit"),
         ),
+        # 2dog: libgodot archives link into .NET apps whose floor is iOS 15.0, libc++'s supported minimum.
+        ("ios_min_version", "Minimum iOS version to target", "15.0"),
     ]
 
 
@@ -124,14 +126,14 @@ def configure(env: "SConsEnvironment"):
 
     if env["simulator"]:
         env["APPLE_PLATFORM"] = "iossimulator"
-        env.Append(ASFLAGS=["-mios-simulator-version-min=15.0"])
-        env.Append(CCFLAGS=["-mios-simulator-version-min=15.0"])
+        env.Append(ASFLAGS=["-mios-simulator-version-min=" + env["ios_min_version"]])
+        env.Append(CCFLAGS=["-mios-simulator-version-min=" + env["ios_min_version"]])
         env.Append(CPPDEFINES=["IOS_SIMULATOR"])
         env.extra_suffix = ".simulator" + env.extra_suffix
     else:
         env["APPLE_PLATFORM"] = "ios"
-        env.Append(ASFLAGS=["-miphoneos-version-min=15.0"])
-        env.Append(CCFLAGS=["-miphoneos-version-min=15.0"])
+        env.Append(ASFLAGS=["-miphoneos-version-min=" + env["ios_min_version"]])
+        env.Append(CCFLAGS=["-miphoneos-version-min=" + env["ios_min_version"]])
     detect_darwin_sdk_path(env["APPLE_PLATFORM"], env)
 
     env.Append(CCFLAGS=["-ffp-contract=off"])
