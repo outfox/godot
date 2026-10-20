@@ -1070,6 +1070,16 @@ public:
 		bool dont_print_on_render_pipeline_creation_failure = false;
 		bool disable_ubershaders = false;
 		bool avoid_store_op_dont_care_in_draw_list_with_no_bound_pipeline = false;
+		// API limitations (WebGPU).
+		bool async_texture_readback = false; // texture_get_data() is empty until an asynchronous readback completes.
+		bool no_input_attachments = false; // Subpass input attachments can't be read.
+		bool no_texture_swizzle = false; // Texture view component swizzles are ignored.
+		bool no_storage_render_targets = false; // Render targets can't be storage textures with sRGB views.
+		// Renderer policies for a high fixed cost per API call (WebGPU), needing RENDER_DRIVER_WEBGPU shaders.
+		bool force_omni_dual_paraboloid = false; // Fewer shadow passes than cubemaps.
+		bool merge_shadow_passes = false; // Draw shadow passes sharing a framebuffer in one render pass.
+		bool batch_instance_draws = false; // Instance same-mesh draws, pass the instance index via the first instance.
+		bool skeleton_atlas = false; // One bone buffer for all skeletons, uploaded with buffer_update_direct().
 	};
 
 	////////////////////////////////////////////
