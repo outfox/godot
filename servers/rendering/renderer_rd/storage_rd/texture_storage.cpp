@@ -996,6 +996,7 @@ void TextureStorage::texture_2d_initialize(RID p_texture, const Ref<Image> &p_im
 
 	TextureToRDFormat ret_format;
 	Ref<Image> image = _validate_texture_format(p_image, ret_format);
+	ERR_FAIL_COND(image.is_null());
 
 	Texture texture;
 
@@ -1090,6 +1091,7 @@ void TextureStorage::texture_2d_layered_initialize(RID p_texture, const Vector<R
 			}
 
 			images.push_back(_validate_texture_format(p_layers[i], ret_format));
+			ERR_FAIL_COND(images[images.size() - 1].is_null());
 		}
 	}
 
@@ -1192,6 +1194,7 @@ void TextureStorage::texture_3d_initialize(RID p_texture, Image::Format p_format
 		for (int i = 0; i < p_data.size(); i++) {
 			TextureToRDFormat f;
 			images.write[i] = _validate_texture_format(p_data[i], f);
+			ERR_FAIL_COND(images[i].is_null());
 			if (i == 0) {
 				ret_format = f;
 				validated_format = images[0]->get_format();
@@ -1353,6 +1356,7 @@ void TextureStorage::texture_drawable_initialize(RID p_texture, int p_width, int
 	TextureToRDFormat ret_format;
 
 	Ref<Image> valid_image = _validate_texture_format(image, ret_format);
+	ERR_FAIL_COND(valid_image.is_null());
 	Texture texture;
 
 	texture.type = TextureStorage::TYPE_2D;
@@ -1650,6 +1654,7 @@ void TextureStorage::_texture_2d_update(RID p_texture, const Ref<Image> &p_image
 #endif
 	TextureToRDFormat f;
 	Ref<Image> validated = _validate_texture_format(p_image, f);
+	ERR_FAIL_COND(validated.is_null());
 
 	RD::get_singleton()->texture_update(tex->rd_texture, p_layer, validated->get_data());
 }
@@ -1959,7 +1964,7 @@ Ref<Image> TextureStorage::texture_2d_get(RID p_texture) const {
 		ERR_FAIL_V_MSG(Ref<Image>(), vformat("Texture %s has no data.", path_str));
 	}
 
-	if (tex->format != tex->validated_format) {
+	if (tex->format != tex->validated_format && !Image::is_format_compressed(tex->format)) {
 		image->convert(tex->format);
 	}
 
@@ -2385,10 +2390,18 @@ Ref<Image> TextureStorage::_validate_texture_format(const Ref<Image> &p_image, T
 	// to a supported format for only those cases.
 	Ref<Image> image = p_image;
 
-	// Without view swizzles, the luminance must be expanded in the data (Image::convert copies L into RGB).
-	const bool expand_luminance = (original_format == Image::FORMAT_L8 || original_format == Image::FORMAT_LA8) && RD::get_singleton()->get_driver_workarounds().no_texture_swizzle;
-	if (expand_luminance) {
-		image = duplicate_decompress_and_convert(p_image, Image::FORMAT_RGBA8);
+	const bool no_swizzle = RD::get_singleton()->get_driver_workarounds().no_texture_swizzle;
+	const bool expand_swizzled = no_swizzle && (original_format == Image::FORMAT_L8 || original_format == Image::FORMAT_LA8 || original_format == Image::FORMAT_RGBA4444 || original_format == Image::FORMAT_RGB565 || original_format == Image::FORMAT_DXT5_RA_AS_RG || original_format == Image::FORMAT_ETC2_RA_AS_RG);
+	const bool expand_luminance = no_swizzle && (original_format == Image::FORMAT_L8 || original_format == Image::FORMAT_LA8);
+	if (no_swizzle) {
+		if (expand_luminance || original_format == Image::FORMAT_RGBA4444 || original_format == Image::FORMAT_RGB565) {
+			image = duplicate_decompress_and_convert(p_image, Image::FORMAT_RGBA8);
+		} else if (original_format == Image::FORMAT_DXT5_RA_AS_RG || original_format == Image::FORMAT_ETC2_RA_AS_RG) {
+			// Image decompression restores the RA encoding to RG, including every mip level.
+			image = p_image->duplicate();
+			ERR_FAIL_COND_V(image->decompress() != OK, Ref<Image>());
+			image->convert(Image::FORMAT_RGBA8);
+		}
 	}
 
 	switch (image->get_format()) {
@@ -2984,7 +2997,7 @@ Ref<Image> TextureStorage::_validate_texture_format(const Ref<Image> &p_image, T
 	const bool is_rgb_format = original_format == Image::FORMAT_RGB8 || original_format == Image::FORMAT_RGBH || original_format == Image::FORMAT_RGBF ||
 			original_format == Image::FORMAT_RGB16 || original_format == Image::FORMAT_RGB16I;
 
-	if (!is_rgb_format && (is_print_verbose_enabled() || !expand_luminance) && original_format != image->get_format()) {
+	if (!is_rgb_format && (is_print_verbose_enabled() || !expand_swizzled) && original_format != image->get_format()) {
 		WARN_PRINT(vformat("Image format %s not supported by hardware, converting to %s.", Image::get_format_name(original_format), Image::get_format_name(image->get_format())));
 	}
 
