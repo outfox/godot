@@ -72,6 +72,7 @@ const Engine = (function () {
 	 * @constructor
 	 */
 	function SafeEngine(initConfig) {
+		let webgpuFallback = false;
 		const proto = /** @lends Engine.prototype */ {
 			/**
 			 * Initialize the engine instance. Optionally, pass the base path to the engine to load it,
@@ -87,6 +88,9 @@ const Engine = (function () {
 				}
 				const args = this.config.args;
 				for (let i = 0; i + 1 < args.length; i++) {
+					if (args[i] === '--' || args[i] === '++') {
+						break;
+					}
 					if (args[i] === '--rendering-driver') {
 						this.config.renderingDriver = args[++i];
 					}
@@ -132,6 +136,11 @@ const Engine = (function () {
 				if (me.config.renderingDriver === 'webgpu' && !me.config.preinitializedWebGPUDevice) {
 					initPromise = Engine.requestWebGPUDevice().then(function (device) {
 						me.config.preinitializedWebGPUDevice = device;
+						return doInit(loadPromise);
+					}, function (err) {
+						console.warn('WebGPU device unavailable; falling back to WebGL 2 Compatibility.', err); // eslint-disable-line no-console
+						webgpuFallback = true;
+						me.config.renderingDriver = 'opengl3';
 						return doInit(loadPromise);
 					});
 				} else {
@@ -180,6 +189,23 @@ const Engine = (function () {
 				return me.init().then(function () {
 					if (!me.rtenv) {
 						return Promise.reject(new Error('The engine must be initialized before it can be started'));
+					}
+					if (webgpuFallback) {
+						// Apply after start overrides too (e.g. the separate init/preload/start path).
+						const args = me.config.args;
+						const fallbackArgs = [];
+						for (let i = 0; i < args.length; i++) {
+							if (args[i] === '--' || args[i] === '++') {
+								fallbackArgs.push.apply(fallbackArgs, args.slice(i));
+								break;
+							}
+							if (args[i] === '--rendering-driver' || args[i] === '--rendering-method') {
+								i++;
+							} else {
+								fallbackArgs.push(args[i]);
+							}
+						}
+						me.config.args = ['--rendering-driver', 'opengl3', '--rendering-method', 'gl_compatibility'].concat(fallbackArgs);
 					}
 
 					let config = {};
