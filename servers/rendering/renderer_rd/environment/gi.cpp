@@ -455,9 +455,13 @@ void GI::SDFGI::create(RID p_env, const Vector3 &p_world_position, uint32_t p_re
 		}
 
 		tf_render.format = RD::DATA_FORMAT_R32_UINT;
-		tf_render.usage_bits |= RD::TEXTURE_USAGE_STORAGE_ATOMIC_BIT;
-		render_geom_facing = create_clear_texture(tf_render, "SDFGI Render Geometry Facing");
-		tf_render.usage_bits &= ~RD::TEXTURE_USAGE_STORAGE_ATOMIC_BIT;
+		if (OS::get_singleton()->get_current_rendering_driver_name() == "webgpu") {
+			render_geom_facing = RD::get_singleton()->storage_buffer_create(cascade_size * cascade_size * cascade_size * sizeof(uint32_t));
+		} else {
+			tf_render.usage_bits |= RD::TEXTURE_USAGE_STORAGE_ATOMIC_BIT;
+			render_geom_facing = create_clear_texture(tf_render, "SDFGI Render Geometry Facing");
+			tf_render.usage_bits &= ~RD::TEXTURE_USAGE_STORAGE_ATOMIC_BIT;
+		}
 
 		tf_render.format = RD::DATA_FORMAT_R8G8B8A8_UINT;
 		render_sdf[0] = create_clear_texture(tf_render, "SDFGI Render SDF 0");
@@ -4238,7 +4242,7 @@ void GI::process_gi(Ref<RenderSceneBuffersRD> p_render_buffers, const RID *p_nor
 				RD::Uniform u;
 				u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 				u.binding = 14;
-				RID buffer = p_voxel_gi_buffer_slices[v].is_valid() ? p_voxel_gi_buffer_slices[v] : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+				RID buffer = p_voxel_gi_buffer_slices[v].is_valid() ? p_voxel_gi_buffer_slices[v] : texture_storage->texture_rd_get_default(RD::get_singleton()->get_device_api_name() == "WebGPU" ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_UINT : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
 				u.append_id(buffer);
 				uniforms.push_back(u);
 			}
