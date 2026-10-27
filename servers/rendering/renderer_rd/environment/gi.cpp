@@ -3602,6 +3602,13 @@ void GI::init(SkyRD *p_sky) {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
 
+	// The SDFGI and VoxelGI compute shaders read and write RGBA8, RGBA16 and RGBA32 storage textures in place. A platform
+	// without that access (WebGPU without texture-formats-tier2) keeps the rest of the clustered renderer, and the scene
+	// renderer skips these features with a warning.
+	const bool limited_read_write_storage = RD::get_singleton()->get_driver_workarounds().limited_read_write_storage;
+	sdfgi_supported = !limited_read_write_storage;
+	voxel_gi_supported = !limited_read_write_storage;
+
 	/* GI */
 
 	{
@@ -3610,7 +3617,9 @@ void GI::init(SkyRD *p_sky) {
 		voxel_gi_lights = memnew_arr(VoxelGILight, voxel_gi_max_lights);
 		voxel_gi_lights_uniform = RD::get_singleton()->uniform_buffer_create(voxel_gi_max_lights * sizeof(VoxelGILight));
 		voxel_gi_quality = RSE::VoxelGIQuality(CLAMP(int(GLOBAL_GET("rendering/global_illumination/voxel_gi/quality")), 0, 1));
+	}
 
+	if (voxel_gi_supported) {
 		String defines = "\n#define MAX_LIGHTS " + itos(voxel_gi_max_lights) + "\n";
 
 		Vector<String> versions;
@@ -3657,7 +3666,7 @@ void GI::init(SkyRD *p_sky) {
 
 	/* SDGFI */
 
-	{
+	if (sdfgi_supported) {
 		Vector<String> preprocess_modes;
 		preprocess_modes.push_back("\n#define MODE_SCROLL\n");
 		preprocess_modes.push_back("\n#define MODE_SCROLL_OCCLUSION\n");
@@ -3679,7 +3688,7 @@ void GI::init(SkyRD *p_sky) {
 		}
 	}
 
-	{
+	if (sdfgi_supported) {
 		//calculate tables
 		String defines = "\n#define OCT_SIZE " + itos(SDFGI::LIGHTPROBE_OCT_SIZE) + "\n";
 
@@ -3693,7 +3702,7 @@ void GI::init(SkyRD *p_sky) {
 		}
 	}
 
-	{
+	if (sdfgi_supported) {
 		//calculate tables
 		String defines = "\n#define OCT_SIZE " + itos(SDFGI::LIGHTPROBE_OCT_SIZE) + "\n";
 		defines += "\n#define SH_SIZE " + itos(SDFGI::SH_SIZE) + "\n";
@@ -4332,6 +4341,9 @@ void GI::voxel_gi_instance_set_transform_to_data(RID p_probe, const Transform3D 
 }
 
 bool GI::voxel_gi_needs_update(RID p_probe) const {
+	if (!voxel_gi_supported) {
+		return false;
+	}
 	VoxelGIInstance *voxel_gi = voxel_gi_instance_owner.get_or_null(p_probe);
 	ERR_FAIL_NULL_V(voxel_gi, false);
 
@@ -4339,6 +4351,9 @@ bool GI::voxel_gi_needs_update(RID p_probe) const {
 }
 
 void GI::voxel_gi_update(RID p_probe, bool p_update_light_instances, const Vector<RID> &p_light_instances, const PagedArray<RenderGeometryInstance *> &p_dynamic_objects) {
+	if (!voxel_gi_supported) {
+		return;
+	}
 	VoxelGIInstance *voxel_gi = voxel_gi_instance_owner.get_or_null(p_probe);
 	ERR_FAIL_NULL(voxel_gi);
 
@@ -4346,6 +4361,9 @@ void GI::voxel_gi_update(RID p_probe, bool p_update_light_instances, const Vecto
 }
 
 void GI::debug_voxel_gi(RID p_voxel_gi, RD::DrawListID p_draw_list, RID p_framebuffer, const Projection &p_camera_with_transform, bool p_lighting, bool p_emission, float p_alpha) {
+	if (!voxel_gi_supported) {
+		return; // The instance texture is never filled.
+	}
 	VoxelGIInstance *voxel_gi = voxel_gi_instance_owner.get_or_null(p_voxel_gi);
 	ERR_FAIL_NULL(voxel_gi);
 
