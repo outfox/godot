@@ -341,6 +341,14 @@ public:
 	// Returns the data of a texture layer for a CPU texture that was created with TEXTURE_USAGE_CPU_READ_BIT.
 	virtual Vector<uint8_t> texture_get_data(TextureID p_texture, uint32_t p_layer) = 0;
 	virtual BitField<TextureUsageBits> texture_get_usages_supported_by_format(DataFormat p_format, bool p_cpu_readable) = 0;
+	// 2dog: lets the renderer pick one sample count that every attachment format of a pass supports.
+	virtual bool texture_is_format_supported_for_samples(DataFormat p_format, TextureSamples p_samples) {
+		TextureFormat tf;
+		tf.format = p_format;
+		tf.samples = p_samples;
+		tf.usage_bits = format_has_depth(p_format) ? TEXTURE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
+		return texture_get_nearest_supported_samples(tf) == p_samples;
+	}
 	virtual bool texture_can_make_shared_with_format(TextureID p_texture, DataFormat p_format, bool &r_raw_reinterpretation) = 0;
 
 	/*****************/
