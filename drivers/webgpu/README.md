@@ -1,7 +1,7 @@
 # WebGPU rendering driver
 
 This opt-in backend ports `dwalter/godotwebgpu` at
-`f329e39ce8db7acaa5c9d6628a530fb769969228` to the 2dog Godot 4.7.2 fork.
+`f329e39ce8db7acaa5c9d6628a530fb769969228` to the 2dog Godot fork.
 It supports browser WebGPU and optional native Dawn on Windows, Linux and macOS.
 Existing rendering defaults and other backends remain available.
 
@@ -14,7 +14,9 @@ with fewer than 40 sampled textures or 10 storage buffers per stage. Without
 with SDFGI and VoxelGI disabled and the raster depth of field, warning once per
 feature a scene asks for; SSIL is disabled only on adapters with tier1 but not
 tier2. Android, double-precision and multithreaded browser runtimes
-reject WebGPU explicitly.
+reject WebGPU explicitly. Texture streaming is unavailable: its feedback needs
+subgroups, so a project that enables it warns once and loads full-resolution
+textures, like the Compatibility renderer.
 Headless resource imports and exports remain supported for WebGPU projects.
 Read/write storage textures require adapter-native format support; unsupported
 formats and overlapping writable storage-buffer bindings fail explicitly.

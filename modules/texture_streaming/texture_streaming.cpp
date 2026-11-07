@@ -286,6 +286,12 @@ void TextureStreaming::_start_streaming() {
 		WARN_PRINT("Texture streaming is not supported with the Compatibility renderer.");
 		return;
 	}
+	// 2dog: the WebGPU scene shaders have no feedback path (see scene_forward_*_inc.glsl).
+	if (OS::get_singleton()->get_current_rendering_driver_name() == "webgpu") {
+		WARN_PRINT("Texture streaming is not supported with the WebGPU rendering driver.");
+		setting_streaming_is_enabled = false;
+		return;
+	}
 
 	feedback_buffer_thread.start(_feedback_buffer_thread_func, this);
 	texture_reload_thread.start(_texture_reload_thread_func, this);
