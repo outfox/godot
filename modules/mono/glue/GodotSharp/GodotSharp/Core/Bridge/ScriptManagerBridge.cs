@@ -871,6 +871,8 @@ namespace Godot.Bridge
                 // as these always accompany "InvokeGodotClassMethod" and "RaiseGodotClassSignalCallbacks".
                 *outShouldFallbackToLegacyTrampolines =
                     (DoesUserScriptContainMethod("InvokeGodotClassMethod")
+                     // 2dog: classes built without the source generators may override only this, like 2dog.repl's logger.
+                     || DoesUserScriptContainMethod("HasGodotClassMethod")
                      || DoesUserScriptContainMethod("SetGodotClassPropertyValue")
                      || DoesUserScriptContainMethod("GetGodotClassPropertyValue")
                      || DoesUserScriptContainMethod("RaiseGodotClassSignalCallbacks")).ToGodotBool();
