@@ -8200,7 +8200,8 @@ uint64_t RenderingDeviceDriverWebGPU::api_trait_get(ApiTrait p_trait) {
 			return 256;
 		case API_TRAIT_SECONDARY_VIEWPORT_SCISSOR:
 			return 0;
-		case API_TRAIT_CLEARS_WITH_COPY_ENGINE:
+		case API_TRAIT_BUFFER_CLEARS_WITH_COPY_ENGINE:
+		case API_TRAIT_TEXTURE_CLEARS_WITH_COPY_ENGINE:
 			return 0;
 		case API_TRAIT_USE_GENERAL_IN_COPY_QUEUES:
 			return 0;

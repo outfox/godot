@@ -718,9 +718,10 @@ if env["scu_build"]:
 
     methods.set_scu_folders(scu_builders.generate_scu_files(max_includes_per_scu))
 
-# 2dog: the WebGPU driver brings RenderingDevice to the web platform.
+# 2dog: the WebGPU driver brings RenderingDevice to the web platform, without the desktop drivers.
 if env["platform"] == "web" and env["webgpu"]:
     env["rendering_device"] = True
+    env["vulkan"] = False
 
 if env["rendering_device"]:
     if env["platform"] == "web" and not env["webgpu"]:

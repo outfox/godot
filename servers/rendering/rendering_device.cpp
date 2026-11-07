@@ -2005,7 +2005,7 @@ RID RenderingDevice::external_texture_create(ExternalTextureShareHandleType p_ha
 	ERR_FAIL_COND_V(!driver_id, RID());
 
 	// 2dog: count external allocations in texture_memory to prevent underflow when textures are freed.
-	texture_memory += driver->texture_get_allocation_size(driver_id);
+	texture_memory.add(driver->texture_get_allocation_size(driver_id));
 
 	Texture texture;
 	texture.type = TEXTURE_TYPE_2D;

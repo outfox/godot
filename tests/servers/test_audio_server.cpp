@@ -32,11 +32,12 @@
 
 TEST_FORCE_LINK(test_audio_server)
 
+#include "servers/audio/audio_driver.h"
 #include "servers/audio/audio_server.h"
 
 #ifdef TOOLS_ENABLED
 #include "editor/audio/audio_stream_preview.h"
-#include "scene/resources/audio_stream_wav.h"
+#include "scene/resources/audio/audio_stream_wav.h"
 #endif
 
 namespace TestAudioServer {

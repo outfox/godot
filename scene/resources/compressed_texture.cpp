@@ -258,7 +258,7 @@ Ref<Image> CompressedTexture2D::get_image() const {
 			Ref<FileAccess> f = FileAccess::open(path_to_file, FileAccess::READ);
 			if (f.is_valid()) {
 				f->seek(4 + 8 * sizeof(uint32_t)); // Skip the header read by _load_data().
-				return load_image_from_file(f, 0);
+				return load_image_from_file(f);
 			}
 		}
 		return RS::get_singleton()->texture_2d_get(texture);
