@@ -10,6 +10,8 @@
 // the lightmaps and two VoxelGIs. The counts stay out of the general defines so shader bakes from any host match.
 #define LIGHTMAP_TEXTURE_SLOTS (MAX_LIGHTMAP_TEXTURES / 2)
 #define VOXEL_GI_TEXTURE_SLOTS 2
+// Streaming feedback needs subgroups WebGPU lacks and a storage buffer beyond Chrome on Metal's limit.
+#undef TEXTURE_STREAMING
 #else
 #define LIGHTMAP_TEXTURE_SLOTS MAX_LIGHTMAP_TEXTURES
 #define VOXEL_GI_TEXTURE_SLOTS MAX_VOXEL_GI_INSTANCES

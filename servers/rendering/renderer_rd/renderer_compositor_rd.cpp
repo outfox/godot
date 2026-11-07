@@ -380,7 +380,7 @@ RendererCompositorRD::RendererCompositorRD() {
 	String rendering_method = OS::get_singleton()->get_current_rendering_method();
 	if (rendering_method == "forward_plus") {
 		String missing;
-		// The clustered scene shader's fragment stage samples 47 textures with 8 lightmaps and 8 VoxelGIs, 33 with the
+		// The clustered scene shader's fragment stage samples 48 textures with 8 lightmaps and 8 VoxelGIs, 34 with the
 		// compact bindings of RenderForwardClustered, plus the material's textures. Its storage buffers and the WebGPU
 		// push constant buffer take 11 slots, 10 with the lightmaps in a uniform buffer.
 		const bool compact_bindings = RD::get_singleton()->get_driver_workarounds().compact_scene_bindings;

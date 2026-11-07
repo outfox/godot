@@ -1,6 +1,11 @@
 #define M_PI 3.14159265359
 #define MAX_VIEWS 2
 
+#ifdef RENDER_DRIVER_WEBGPU
+// Streaming feedback needs subgroups WebGPU lacks.
+#undef TEXTURE_STREAMING
+#endif
+
 #include "../decal_data_inc.glsl"
 #include "../oct_inc.glsl"
 #include "../scene_data_inc.glsl"
