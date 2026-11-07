@@ -332,6 +332,7 @@ static void reset_command_line_state() {
 
 	accessibility_mode = AccessibilityServerEnums::AccessibilityMode::ACCESSIBILITY_AUTO;
 	accessibility_driver_name = "";
+	accessibility_driver_idx = -1;
 	accessibility_mode_set = false;
 	single_window = false;
 	editor = false;
@@ -341,8 +342,8 @@ static void reset_command_line_state() {
 	log_file = "";
 	show_help = false;
 	quit_after = 0;
-	editor_pid = 0;
 #ifdef TOOLS_ENABLED
+	editor_pid = 0;
 	found_project = false;
 	recovery_mode = false;
 	auto_build_solutions = false;
@@ -382,8 +383,8 @@ static void reset_command_line_state() {
 	use_custom_res = true;
 	force_res = false;
 
-	use_debug_profiler = false;
 #ifdef DEBUG_ENABLED
+	use_debug_profiler = false;
 	debug_collisions = false;
 	debug_paths = false;
 	debug_navigation = false;

@@ -1181,7 +1181,7 @@ Vector<RD::ShaderStageSPIRVData> ShaderRD::compile_stages(const Vector<String> &
 #ifdef MODULE_GLSLANG_ENABLED
 		if (p_format) {
 			stage.spirv = compile_glslang_shader(RD::ShaderStage(i), ShaderIncludeDB::parse_include_files(p_stage_sources[i]),
-					p_format->get_shader_language_version(), p_format->get_shader_spirv_version(), &error);
+					p_format->get_shader_language_version(), p_format->get_shader_spirv_version(RD::ShaderStage(i)), &error);
 		} else
 #endif
 		{
