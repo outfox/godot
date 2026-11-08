@@ -34,7 +34,7 @@
 #include "core/core_globals.h"
 #include "core/os/main_loop.h"
 #include "core/profiling/profiling.h"
-#import "drivers/apple_embedded/app_delegate_service.h"
+#import "drivers/apple_embedded/godot_app_delegate_service_apple_embedded.h"
 #import "drivers/apple_embedded/display_server_apple_embedded.h"
 #import "drivers/apple_embedded/godot_view_controller.h"
 #import "drivers/apple_embedded/main_utilities.h"
