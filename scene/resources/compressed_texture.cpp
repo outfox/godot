@@ -252,6 +252,7 @@ bool CompressedTexture2D::has_alpha() const {
 
 Ref<Image> CompressedTexture2D::get_image() const {
 	if (texture.is_valid()) {
+#ifdef RD_ENABLED
 		const RenderingDevice *rd = RS::get_singleton()->get_rendering_device();
 		if (rd && rd->get_driver_workarounds().async_texture_readback && !path_to_file.is_empty()) {
 			// shortcut: reloads the file as the readback can't finish synchronously; drop once RD supports that there.
@@ -261,6 +262,7 @@ Ref<Image> CompressedTexture2D::get_image() const {
 				return load_image_from_file(f);
 			}
 		}
+#endif // RD_ENABLED
 		return RS::get_singleton()->texture_2d_get(texture);
 	} else {
 		return Ref<Image>();

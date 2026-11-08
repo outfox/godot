@@ -661,12 +661,23 @@ RDD::TextureID RenderingDeviceDriverMetal::external_texture_create(ExternalTextu
 	// 2dog: the texture retains its IOSurface; release the creation reference.
 	CFRelease(surface);
 
-	_track_resource(obj);
+	// 2dog: registered like texture_create_from_extension: not heap-allocated, so it needs explicit residency.
+	TextureInfo *tex_info = VersatileResource::allocate<TextureInfo>(resources_allocator);
+	tex_info->texture = NS::TransferPtr(obj);
+	tex_info->imported = true;
+	{
+		MutexLock lock(imported_textures_mutex);
+		imported_textures.push_back(obj);
+	}
+	if (main_residency_set) {
+		main_residency_set->addAllocation(obj);
+		main_residency_set->commit();
+	}
 
 	if (r_export_handle != nullptr) {
 		*r_export_handle = (uint64_t)(uintptr_t)surface;
 	}
-	return TextureID(reinterpret_cast<uint64_t>(obj));
+	return TextureID(tex_info);
 }
 
 uint64_t RenderingDeviceDriverMetal::texture_get_allocation_size(TextureID p_texture) {
