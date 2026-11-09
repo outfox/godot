@@ -1136,7 +1136,10 @@ namespace Godot.Bridge
             public TrampolineCollectionOptions CollectionOptions { get; } = collectionOptions;
         }
 
-        private static void GetGodotClassTrampolinesForType(Type type, TrampolineCollectorPool collectorPool)
+        [UnconditionalSuppressMessage("Trimming", "IL2075",
+            Justification = "GodotInternal is a nested type of the script type, kept by its annotation. " + TrimJustifications.ScriptTypesAreRooted)]
+        private static void GetGodotClassTrampolinesForType(
+            [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.All)] Type type, TrampolineCollectorPool collectorPool)
         {
             Type? godotInternalType;
 
