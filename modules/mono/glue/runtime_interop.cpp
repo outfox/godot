@@ -585,6 +585,7 @@ float godotsharp_color_get_ok_hsl_l(const Color *p_self) {
 // gdnative.h
 
 void godotsharp_method_bind_ptrcall(MethodBind *p_method_bind, Object *p_instance, const void **p_args, void *p_ret) {
+	ERR_FAIL_NULL_MSG(p_method_bind, "This method is not available in this Godot build."); // 2dog: see ClassDB_get_method_with_compatibility.
 	p_method_bind->ptrcall(p_instance, p_args, p_ret);
 }
 
@@ -593,6 +594,11 @@ godot_variant godotsharp_method_bind_call(MethodBind *p_method_bind, Object *p_i
 	memnew_placement(&ret, Variant());
 
 	Variant *ret_val = (Variant *)&ret;
+
+	if (unlikely(p_method_bind == nullptr)) {
+		p_call_error->error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
+		return ret;
+	}
 
 	*ret_val = p_method_bind->call(p_instance, (const Variant **)p_args, p_arg_count, *p_call_error);
 

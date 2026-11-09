@@ -311,12 +311,9 @@ namespace Godot
         {
             var typeSelf = (godot_string_name)type.NativeValue;
             var methodSelf = (godot_string_name)method.NativeValue;
-            IntPtr methodBind = NativeFuncs.godotsharp_method_bind_get_method_with_compatibility(typeSelf, methodSelf, hash);
-
-            if (methodBind == IntPtr.Zero)
-                throw new NativeMethodBindNotFoundException(type + "." + method);
-
-            return methodBind;
+            // 2dog: one glue serves every build; binds a build compiles out (RenderingServer's RD methods on the web)
+            // resolve to null here so the class still loads, and the native call fails when they are used.
+            return NativeFuncs.godotsharp_method_bind_get_method_with_compatibility(typeSelf, methodSelf, hash);
         }
 
         internal static unsafe delegate* unmanaged<godot_bool, IntPtr> ClassDB_get_constructor(StringName type)
