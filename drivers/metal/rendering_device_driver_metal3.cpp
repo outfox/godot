@@ -88,6 +88,12 @@ Error RenderingDeviceDriverMetal::_create_device() {
 }
 
 void RenderingDeviceDriverMetal::_resolve_sync_mode() {
+	// 2dog: on Apple's virtual GPU (macOS VMs such as hosted CI runners) barrier-mode command buffers never complete:
+	// every fence wait times out and nothing renders. Use native hazard tracking there, as 4.7 did everywhere.
+	if (sync_mode == Barriers && String::utf8(device->name()->utf8String()).contains("Paravirtual")) {
+		sync_mode = HazardTracking;
+	}
+
 	if (sync_mode == Barriers) {
 		print_verbose("Metal 3: Barrier synchronization enabled.");
 		base_hazard_tracking = MTL::ResourceHazardTrackingModeUntracked;
