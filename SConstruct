@@ -723,6 +723,11 @@ if env["platform"] == "web" and env["webgpu"]:
     env["rendering_device"] = True
     env["vulkan"] = False
 
+# 2dog: the iOS Simulator has no Metal or Vulkan driver; RenderingDevice without one registers no renderer, so a
+# Forward+/Mobile project crashes in RenderingServer init instead of using Compatibility (as on 4.7).
+if env["platform"] == "ios" and env["simulator"]:
+    env["rendering_device"] = False
+
 if env["rendering_device"]:
     if env["platform"] == "web" and not env["webgpu"]:
         # Not available in the web platform.
