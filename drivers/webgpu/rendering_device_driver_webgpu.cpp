@@ -4303,11 +4303,13 @@ RDD::UniformSetID RenderingDeviceDriverWebGPU::uniform_set_create(VectorView<Bou
 			case UNIFORM_TYPE_INPUT_ATTACHMENT: {
 				WGPUTextureViewDimension expected_dim = WGPUTextureViewDimension_Undefined;
 				WGPUTextureSampleType expected_sample = WGPUTextureSampleType_Undefined;
+				bool expected_used = false;
 				if (p_set_index < (uint32_t)shader->bind_group_infos.size()) {
 					for (const auto &bge : shader->bind_group_infos[p_set_index].entries) {
 						if (bge.layout_entry.binding == uniform.binding * 2) {
 							expected_dim = bge.layout_entry.texture.viewDimension;
 							expected_sample = bge.layout_entry.texture.sampleType;
+							expected_used = bge.layout_entry.visibility != WGPUShaderStage_None;
 							break;
 						}
 					}
@@ -4324,6 +4326,9 @@ RDD::UniformSetID RenderingDeviceDriverWebGPU::uniform_set_create(VectorView<Bou
 						if (expected_sample == WGPUTextureSampleType_Float &&
 								is_depth_format_wgpu(tex->format) &&
 								fallback_float_texture_view != nullptr) {
+							if (expected_used) {
+								_warn_depth_as_float(shader->name, p_set_index, uniform.binding);
+							}
 							// Also check if we need cube dimension for the depth fallback.
 							if (expected_dim == WGPUTextureViewDimension_Cube && fallback_cube_texture_view != nullptr) {
 								entry.textureView = fallback_cube_texture_view;
@@ -4397,6 +4402,7 @@ RDD::UniformSetID RenderingDeviceDriverWebGPU::uniform_set_create(VectorView<Bou
 				WGPUTextureViewDimension swt_expected_dim = WGPUTextureViewDimension_Undefined;
 				WGPUTextureSampleType swt_expected_sample = WGPUTextureSampleType_Float;
 				bool swt_expected_ms = false;
+				bool swt_expected_used = false;
 				bool texture_only = false; // A multisampled texture without its sampler, at binding*2.
 				if (p_set_index < (uint32_t)shader->bind_group_infos.size()) {
 					for (const auto &bge : shader->bind_group_infos[p_set_index].entries) {
@@ -4438,6 +4444,7 @@ RDD::UniformSetID RenderingDeviceDriverWebGPU::uniform_set_create(VectorView<Bou
 							swt_expected_dim = bge.layout_entry.texture.viewDimension;
 							swt_expected_sample = bge.layout_entry.texture.sampleType;
 							swt_expected_ms = (bool)bge.layout_entry.texture.multisampled;
+							swt_expected_used = bge.layout_entry.visibility != WGPUShaderStage_None;
 							break;
 						}
 					}
@@ -4463,9 +4470,15 @@ RDD::UniformSetID RenderingDeviceDriverWebGPU::uniform_set_create(VectorView<Bou
 						bool tex_is_ms = (tex->sample_count > 1);
 						if (swt_expected_ms && (!tex_is_ms || (is_depth_format_wgpu(tex->format) && swt_expected_sample != WGPUTextureSampleType_Depth)) &&
 								fallback_ms_texture_view != nullptr) {
+							if (swt_expected_used && tex_is_ms && is_depth_format_wgpu(tex->format)) {
+								_warn_depth_as_float(shader->name, p_set_index, uniform.binding);
+							}
 							te.textureView = fallback_ms_texture_view;
 						} else if (swt_expected_sample == WGPUTextureSampleType_Float &&
 								is_depth_format_wgpu(tex->format) && fallback_float_texture_view != nullptr) {
+							if (swt_expected_used) {
+								_warn_depth_as_float(shader->name, p_set_index, uniform.binding);
+							}
 							// Only substitute when the shader actually expects a color texture.
 							if (swt_expected_dim == WGPUTextureViewDimension_Cube && fallback_cube_texture_view != nullptr) {
 								te.textureView = fallback_cube_texture_view;
@@ -4632,6 +4645,7 @@ RDD::UniformSetID RenderingDeviceDriverWebGPU::uniform_set_create(VectorView<Bou
 				// For safety, always use fallback for depth alias entries since
 				// they always represent Float sampling of depth data.
 				if (fallback_float_texture_view != nullptr) {
+					_warn_depth_as_float(shader->name, p_set_index, depth_bnd / 2);
 					alias_entry.textureView = fallback_float_texture_view;
 				} else {
 					alias_entry.textureView = alias_view;
@@ -4726,6 +4740,18 @@ WGPUTextureView RenderingDeviceDriverWebGPU::_unused_binding_view(const WGPUBind
 	WGPUTextureView view = wgpuTextureCreateView(texture, &view_desc);
 	unused_binding_views.insert(key, Pair<WGPUTexture, WGPUTextureView>(texture, view));
 	return view;
+}
+
+// WebGPU can't sample a depth texture as float, so the bind group gets a fallback that reads zeros. Vulkan reads the
+// depth there, so a shader relying on it renders differently without any error; warn once per shader binding.
+void RenderingDeviceDriverWebGPU::_warn_depth_as_float(const String &p_shader_name, uint32_t p_set, uint32_t p_binding) {
+	const String shader = p_shader_name.get_slicec(':', 0); // Once for all variants.
+	const String key = vformat("%s:%d:%d", shader, p_set, p_binding);
+	if (depth_as_float_warnings.has(key)) {
+		return;
+	}
+	depth_as_float_warnings.insert(key);
+	WARN_PRINT(vformat("WebGPU: Shader '%s' reads a depth texture as float at set %d, binding %d. WebGPU can't sample depth that way, so it reads zeros instead; use a comparison sampler.", shader, p_set, p_binding));
 }
 
 void RenderingDeviceDriverWebGPU::_fit_unused_bindings(LocalVector<WGPUBindGroupEntry> &r_entries, const WGShader *p_shader, uint32_t p_set_idx) {
@@ -4843,10 +4869,12 @@ WGPUBindGroup RenderingDeviceDriverWebGPU::_get_compatible_bind_group(WGUniformS
 			// substitute the fallback float texture view.
 			if (entry.textureView != nullptr) {
 				WGPUTextureSampleType target_tex_sample = WGPUTextureSampleType_BindingNotUsed;
+				bool target_used = false;
 				for (const auto &bge : p_target_shader->bind_group_infos[p_set_idx].entries) {
 					if (bge.layout_entry.binding == entry.binding &&
 							bge.layout_entry.texture.sampleType != WGPUTextureSampleType_BindingNotUsed) {
 						target_tex_sample = bge.layout_entry.texture.sampleType;
+						target_used = bge.layout_entry.visibility != WGPUShaderStage_None;
 						break;
 					}
 				}
@@ -4865,6 +4893,9 @@ WGPUBindGroup RenderingDeviceDriverWebGPU::_get_compatible_bind_group(WGUniformS
 				if (source_tex_sample == WGPUTextureSampleType_Depth &&
 						target_tex_sample == WGPUTextureSampleType_Float &&
 						fallback_float_texture_view != nullptr) {
+					if (target_used) {
+						_warn_depth_as_float(p_target_shader->name, p_set_idx, entry.binding / 2);
+					}
 					entry.textureView = fallback_float_texture_view;
 				}
 

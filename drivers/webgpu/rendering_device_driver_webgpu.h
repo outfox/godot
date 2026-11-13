@@ -154,6 +154,9 @@ class RenderingDeviceDriverWebGPU : public RenderingDeviceDriver {
 	// (e.g. ResolveRasterShaderRD binds a depth MSAA texture into a float MSAA slot).
 	WGPUTexture fallback_ms_texture = nullptr;
 	WGPUTextureView fallback_ms_texture_view = nullptr;
+	// Shader bindings already warned about reading a depth texture as float ("Shader:set:binding").
+	HashSet<String> depth_as_float_warnings;
+	void _warn_depth_as_float(const String &p_shader_name, uint32_t p_set, uint32_t p_binding);
 
 	// --- Dummy Samplers for BGL Rebinding ---
 	// When a bind group must be re-created with a different BGL (e.g., because
