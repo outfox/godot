@@ -188,9 +188,10 @@ void main() {
 			}
 		}
 	}
-#ifdef RENDER_DRIVER_WEBGPU
+#if defined(RENDER_DRIVER_WEBGPU) && !defined(USE_ALPHA_BLEND)
 	// WebGPU: force opaque alpha — Chrome may ignore CompositeAlphaMode_Opaque
 	// and compositing with alpha<1 produces transparent canvas output.
+	// The blended variant (boot splash) needs its alpha; its pipeline keeps the target alpha instead.
 	color.a = 1.0;
 #endif
 }
