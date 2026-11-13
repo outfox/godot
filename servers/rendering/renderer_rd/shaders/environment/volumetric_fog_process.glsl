@@ -76,6 +76,15 @@ layout(rgba16f, set = 0, binding = 10) uniform restrict writeonly image3D dest_m
 
 layout(set = 0, binding = 11) uniform sampler shadow_sampler;
 
+// How far a shadow atlas position lies behind its occluder (0.0 when lit); callers fade light in fog with exp().
+#ifdef RENDER_DRIVER_WEBGPU
+// WebGPU can't sample a depth texture as float, so the driver would bind zeros there and drop every shadow in fog.
+// Compare instead: the fade spans only centimeters, so occluded positions are fully dark.
+#define FOG_SHADOW_DEPTH_DELTA(m_atlas, m_pos) (textureLod(sampler2DShadow(m_atlas, shadow_sampler), (m_pos).xyz, 0.0) > 0.0 ? 0.0 : -1.0e6)
+#else
+#define FOG_SHADOW_DEPTH_DELTA(m_atlas, m_pos) min(0.0, (m_pos).z - texture(sampler2D(m_atlas, linear_sampler), (m_pos).xy).r)
+#endif
+
 #define MAX_VOXEL_GI_INSTANCES 8
 
 struct VoxelGIData {
@@ -429,8 +438,7 @@ void main() {
 						z_range = directional_lights.data[i].shadow_z_range.w;
 					}
 
-					float depth = texture(sampler2D(directional_shadow_atlas, linear_sampler), pssm_coord.xy).r;
-					float shadow = exp(min(0.0, (pssm_coord.z - depth)) * z_range * INV_FOG_FADE);
+					float shadow = exp(FOG_SHADOW_DEPTH_DELTA(directional_shadow_atlas, pssm_coord) * z_range * INV_FOG_FADE);
 
 					shadow = mix(shadow, 1.0, smoothstep(directional_lights.data[i].fade_from, directional_lights.data[i].fade_to, view_pos.z)); //done with negative values for performance
 
@@ -519,9 +527,7 @@ void main() {
 							pos.xy = pos.xy * 0.5 + 0.5;
 							pos.xy = uv_rect.xy + pos.xy * uv_rect.zw;
 
-							float depth = texture(sampler2D(shadow_atlas, linear_sampler), pos.xy).r;
-
-							shadow_attenuation = mix(1.0 - omni_lights.data[light_index].shadow_opacity, 1.0, exp(min(0.0, (pos.z - depth)) / omni_lights.data[light_index].inv_radius * INV_FOG_FADE));
+							shadow_attenuation = mix(1.0 - omni_lights.data[light_index].shadow_opacity, 1.0, exp(FOG_SHADOW_DEPTH_DELTA(shadow_atlas, pos) / omni_lights.data[light_index].inv_radius * INV_FOG_FADE));
 						}
 						total_light += light * attenuation * shadow_attenuation * henyey_greenstein(dot(safe_normalize(light_pos - view_pos), safe_normalize(view_pos)), params.phase_g) * omni_lights.data[light_index].volumetric_fog_energy;
 					}
@@ -584,9 +590,7 @@ void main() {
 
 							vec3 pos = vec3(splane.xy * spot_lights.data[light_index].atlas_rect.zw + spot_lights.data[light_index].atlas_rect.xy, splane.z);
 
-							float depth = texture(sampler2D(shadow_atlas, linear_sampler), pos.xy).r;
-
-							shadow_attenuation = mix(1.0 - spot_lights.data[light_index].shadow_opacity, 1.0, exp(min(0.0, (pos.z - depth)) / spot_lights.data[light_index].inv_radius * INV_FOG_FADE));
+							shadow_attenuation = mix(1.0 - spot_lights.data[light_index].shadow_opacity, 1.0, exp(FOG_SHADOW_DEPTH_DELTA(shadow_atlas, pos) / spot_lights.data[light_index].inv_radius * INV_FOG_FADE));
 						}
 						total_light += light * attenuation * shadow_attenuation * henyey_greenstein(dot(safe_normalize(light_rel_vec), safe_normalize(view_pos)), params.phase_g) * spot_lights.data[light_index].volumetric_fog_energy;
 					}
@@ -685,9 +689,7 @@ void main() {
 								pos.xy = pos.xy * 0.5 + 0.5;
 								pos.xy = uv_rect.xy + pos.xy * uv_rect.zw;
 
-								float depth = texture(sampler2D(shadow_atlas, linear_sampler), pos.xy).r;
-
-								shadow_attenuation = mix(1.0 - area_lights.data[light_index].shadow_opacity, 1.0, exp(min(0.0, (pos.z - depth)) / inv_center_range * INV_FOG_FADE));
+								shadow_attenuation = mix(1.0 - area_lights.data[light_index].shadow_opacity, 1.0, exp(FOG_SHADOW_DEPTH_DELTA(shadow_atlas, pos) / inv_center_range * INV_FOG_FADE));
 							}
 							float cos_theta = 0.0;
 							if (dot(light_rel_vec, light_rel_vec) > EPSILON) {
