@@ -99,7 +99,11 @@ uint get_facing(ivec3 p_pos) {
 
 layout(rgba8ui, set = 0, binding = 1) uniform restrict readonly uimage3D src_positions;
 layout(r16ui, set = 0, binding = 2) uniform restrict readonly uimage3D src_albedo;
+#ifdef RENDER_DRIVER_WEBGPU
+layout(r32f, set = 0, binding = 3) uniform restrict readonly image3D src_occlusion[8];
+#else
 layout(r8, set = 0, binding = 3) uniform restrict readonly image3D src_occlusion[8];
+#endif
 layout(r32ui, set = 0, binding = 4) uniform restrict readonly uimage3D src_light;
 layout(r32ui, set = 0, binding = 5) uniform restrict readonly uimage3D src_light_aniso;
 #ifdef RENDER_DRIVER_WEBGPU
