@@ -147,7 +147,7 @@ void RendererCompositorRD::initialize() {
 		blit_modes.push_back("\n");
 		blit_modes.push_back("\n#define USE_LAYER\n");
 		blit_modes.push_back("\n#define USE_LAYER\n#define APPLY_LENS_DISTORTION\n");
-		blit_modes.push_back("\n");
+		blit_modes.push_back("\n#define USE_ALPHA_BLEND\n");
 
 		blit.shader.initialize(blit_modes);
 		blit.shader_version = blit.shader.version_create();
@@ -198,9 +198,16 @@ RendererCompositorRD::BlitPipelines RendererCompositorRD::_get_blit_pipelines_fo
 		return it->value;
 	}
 
+	RenderingDevice::PipelineColorBlendState alpha_blend = RenderingDevice::PipelineColorBlendState::create_blend();
+	if (RD::get_singleton()->get_device_api_name() == "WebGPU") {
+		// Blend color only and keep the opaque clear alpha: a browser may composite the canvas with its alpha.
+		alpha_blend.attachments.write[0].src_alpha_blend_factor = RD::BLEND_FACTOR_ZERO;
+		alpha_blend.attachments.write[0].dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+	}
+
 	BlitPipelines pipelines;
 	for (int i = 0; i < BLIT_MODE_MAX; i++) {
-		pipelines.pipelines[i] = RD::get_singleton()->render_pipeline_create(blit.shader.version_get_shader(blit.shader_version, i), format, RD::INVALID_ID, RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), i == BLIT_MODE_NORMAL_ALPHA ? RenderingDevice::PipelineColorBlendState::create_blend() : RenderingDevice::PipelineColorBlendState::create_disabled(), 0);
+		pipelines.pipelines[i] = RD::get_singleton()->render_pipeline_create(blit.shader.version_get_shader(blit.shader_version, i), format, RD::INVALID_ID, RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), i == BLIT_MODE_NORMAL_ALPHA ? alpha_blend : RenderingDevice::PipelineColorBlendState::create_disabled(), 0);
 	}
 	blit.pipelines_by_format.insert(format, pipelines);
 	return pipelines;
