@@ -1346,9 +1346,6 @@ void register_scene_types() {
 		// RenderingServer needs to exist for this to succeed.
 		ColorPickerShape::init_shaders();
 		GraphEdit::init_shaders();
-#ifndef _3D_DISABLED
-		Trail3D::init_shaders();
-#endif //_3D_DISABLED
 	}
 
 	SceneDebugger::initialize();

@@ -32,6 +32,7 @@
 
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "core/os/mutex.h"
 #include "scene/resources/material.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -61,7 +62,13 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
+// Created on first use: at startup every project compiled them, and Web builds compile on the main thread.
 void Trail3D::init_shaders() {
+	static BinaryMutex mutex; // Trails may be created by threaded scene loads.
+	MutexLock lock(mutex);
+	if (local_material.is_valid()) {
+		return;
+	}
 	billboard_additive_shader.instantiate();
 	billboard_additive_shader->set_code(R"(
 shader_type spatial;
@@ -256,6 +263,7 @@ void Trail3D::set_material_mode(MaterialMode p_material_mode) {
 		return;
 	}
 	if (material.is_null()) {
+		init_shaders();
 		if (material_mode == MATERIAL_MODE_ADD) {
 			if (alignment == MESH_ALIGNMENT_LOCAL) {
 				material = local_additive_material->duplicate_deep();
@@ -875,6 +883,7 @@ void Trail3D::_ensure_material() {
 	if (!_mesh.is_valid()) {
 		return;
 	}
+	init_shaders();
 	switch (material_mode) {
 		case MATERIAL_MODE_ADD: {
 			if (alignment == MESH_ALIGNMENT_BILLBOARD) {
