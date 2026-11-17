@@ -350,8 +350,11 @@ void WinRTUtils::destroy_queue() {
 	notifications.clear();
 
 	// Shutdown queue.
+	// Release the controller during teardown, before Windows enters loader shutdown.
+	ComPtr<RODispatcherQueueController> controller;
+	controller.Swap(queue_ctrl);
 	ComPtr<ROAsyncAction> action;
-	ERR_FAIL_COND(FAILED(queue_ctrl->ShutdownQueueAsync((void **)action.GetAddressOf())));
+	ERR_FAIL_COND(FAILED(controller->ShutdownQueueAsync((void **)action.GetAddressOf())));
 
 	ComPtr<ROAsyncInfo> info;
 	ERR_FAIL_COND(FAILED(action.As(&info)));
