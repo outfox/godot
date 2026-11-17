@@ -5106,6 +5106,13 @@ void RenderingDeviceDriverWebGPU::command_copy_texture(CommandBufferID p_cmd_buf
 
 	cmd->end_active_encoder();
 
+	// Block-aligned copy extent (matches _copy_buffer_to_texture): a 1062-row mip of a BC texture is
+	// physically 1064 rows, and WebGPU rejects extents that are not block multiples.
+	uint32_t block_w = 1, block_h = 1;
+	if (src->rd_format != DATA_FORMAT_MAX) {
+		get_compressed_image_format_block_dimensions(src->rd_format, block_w, block_h);
+	}
+
 	for (uint32_t i = 0; i < p_regions.size(); i++) {
 		const TextureCopyRegion &region = p_regions[i];
 
@@ -5121,7 +5128,7 @@ void RenderingDeviceDriverWebGPU::command_copy_texture(CommandBufferID p_cmd_buf
 		dst_copy.origin = { (uint32_t)region.dst_offset.x, (uint32_t)region.dst_offset.y, region.dst_subresources.base_layer };
 		dst_copy.aspect = WGPUTextureAspect_All;
 
-		WGPUExtent3D extent = { (uint32_t)region.size.x, (uint32_t)region.size.y, (uint32_t)region.size.z };
+		WGPUExtent3D extent = { STEPIFY((uint32_t)region.size.x, block_w), STEPIFY((uint32_t)region.size.y, block_h), (uint32_t)region.size.z };
 
 		wgpuCommandEncoderCopyTextureToTexture(cmd->encoder, &src_copy, &dst_copy, &extent);
 	}
