@@ -146,7 +146,10 @@ bool WinRTUtils::create_queue() {
 }
 
 void WinRTUtils::destroy_queue() {
-	IAsyncAction action = controller.ShutdownQueueAsync();
+	// Release the controller during teardown, before Windows enters loader shutdown.
+	DispatcherQueueController shutdown_controller = controller;
+	controller = nullptr;
+	IAsyncAction action = shutdown_controller.ShutdownQueueAsync();
 	while (action.Status() == AsyncStatus::Started) {
 		MSG msg = {};
 		while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
