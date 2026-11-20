@@ -868,6 +868,42 @@ void add_global_enums(Context &r_context) {
 }
 
 TEST_SUITE("[ClassDB]") {
+	TEST_CASE("[ClassDB] Invalid static targets return nil to the caller") {
+		Object *class_db = Engine::get_singleton()->get_singleton_object("ClassDB");
+		REQUIRE(class_db);
+		const Variant class_name = "Object";
+		for (const Variant &method : { Variant("get_class"), Variant("unknown_static_method") }) {
+			const Variant *args[] = { &class_name, &method };
+			Callable::CallError error;
+			ERR_PRINT_OFF;
+			const Variant result = class_db->callp("class_call_static", args, 2, error);
+			ERR_PRINT_ON;
+			CHECK(result.get_type() == Variant::NIL);
+			CHECK(error.error == Callable::CallError::CALL_OK);
+		}
+	}
+
+	TEST_CASE("[ClassDB] Static calls report the invalid argument index and expected type") {
+		Object *class_db = Engine::get_singleton()->get_singleton_object("ClassDB");
+		REQUIRE(class_db);
+		const Variant name = StringName("Object");
+		const Variant invalid = 42;
+		for (int index = 0; index < 2; index++) {
+			const Variant *args[] = { &name, &name };
+			args[index] = &invalid;
+			Callable::CallError error;
+			class_db->callp("class_call_static", args, 2, error);
+			CHECK(error.error == Callable::CallError::CALL_ERROR_INVALID_ARGUMENT);
+			CHECK(error.argument == index);
+			CHECK(error.expected == Variant::STRING_NAME);
+		}
+
+		Callable::CallError error;
+		class_db->callp("class_call_static", nullptr, 0, error);
+		CHECK(error.error == Callable::CallError::CALL_ERROR_TOO_FEW_ARGUMENTS);
+		CHECK(error.expected == 2);
+	}
+
 	TEST_CASE("[ClassDB] Add exposed classes, builtin types, and global enums") {
 		Context context;
 

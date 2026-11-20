@@ -5185,8 +5185,12 @@ void Tree::_notification(int p_what) {
 				}
 			}
 
-			Point2 mouse_position = get_viewport()->get_mouse_position() - get_global_position();
-			if (scrolling && get_rect().grow(theme_cache.scroll_border).has_point(mouse_position)) {
+			Point2 mouse_position = get_local_mouse_position();
+			if (scrolling && get_viewport()->gui_is_mouse_in_viewport() && Rect2(Point2(), get_size()).grow(theme_cache.scroll_border).has_point(mouse_position)) {
+				// On Wayland, each surface has its own pointer coordinates. Allow empty margins only in the focused window.
+				if (!get_viewport()->gui_get_hovered_control() && (!get_window()->has_focus() || get_viewport()->get_focused_subwindow())) {
+					break;
+				}
 				Point2 point;
 
 				if ((Math::abs(mouse_position.x) < Math::abs(mouse_position.x - get_size().width)) && (Math::abs(mouse_position.x) < theme_cache.scroll_border)) {

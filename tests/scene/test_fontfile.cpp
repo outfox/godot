@@ -32,11 +32,45 @@
 
 TEST_FORCE_LINK(test_fontfile)
 
+#include "core/io/file_access.h"
 #include "scene/resources/font.h"
+#include "tests/test_utils.h"
 
 #include "modules/modules_enabled.gen.h" // For freetype.
 
 namespace TestFontFile {
+
+TEST_CASE("[FontFile] BMFont page and kerning indices") {
+	const String path = TestUtils::get_temp_path("indices.fnt");
+	Ref<FileAccess> file = FileAccess::open(path, FileAccess::WRITE);
+	REQUIRE(file.is_valid());
+	SUBCASE("Negative page") {
+		file->store_string("info size=16 unicode=1\ncommon pages=1\npage id=-1\n");
+	}
+	SUBCASE("Page outside the declared count") {
+		file->store_string("info size=16 unicode=1\ncommon pages=1\npage id=1\n");
+	}
+	file->close();
+
+	Ref<FontFile> font;
+	font.instantiate();
+	ERR_PRINT_OFF
+	CHECK(font->load_bitmap_font(path) == ERR_CANT_CREATE);
+	ERR_PRINT_ON
+
+	file = FileAccess::open(path, FileAccess::WRITE);
+	REQUIRE(file.is_valid());
+	file->store_string("info size=16 unicode=1\nkerning first=-1 second=66 amount=2\n"
+					   "kerning first=65 second=-1 amount=2\nkerning first=4294967363 second=66 amount=4\n"
+					   "kerning first=65 second=1114112 amount=3\nkerning first=65 second=66 amount=2\n");
+	file->close();
+	ERR_PRINT_OFF
+	const Error err = font->load_bitmap_font(path);
+	ERR_PRINT_ON
+	REQUIRE(err == OK);
+	CHECK(font->get_kerning_list(0, 16).size() == 1);
+	CHECK(font->get_kerning(0, 16, Vector2i(65, 66)) == Vector2(2, 0));
+}
 
 TEST_CASE("[FontFile] Load Dynamic Font - getters") {
 #ifdef MODULE_FREETYPE_ENABLED

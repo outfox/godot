@@ -106,12 +106,7 @@
 }
 
 - (void)windowDidFailToEnterFullScreen:(NSWindow *)window {
-	if (!ds || !ds->has_window(window_id)) {
-		return;
-	}
-
-	DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
-	wd.fs_transition = false;
+	[self restoreWindowedState];
 }
 
 - (void)windowDidEnterFullScreen:(NSNotification *)notification {
@@ -170,18 +165,20 @@
 }
 
 - (void)windowDidExitFullScreen:(NSNotification *)notification {
+	[self restoreWindowedState];
+	[self windowDidResize:notification];
+}
+
+- (void)restoreWindowedState {
 	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
 	DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
-	if (wd.exclusive_fullscreen) {
-		ds->update_presentation_mode();
-	}
-
 	wd.fullscreen = false;
 	wd.exclusive_fullscreen = false;
 	wd.fs_transition = false;
+	ds->update_presentation_mode();
 
 	// Set window size limits.
 	const float scale = ds->screen_get_max_scale();
@@ -210,9 +207,6 @@
 	if (ds->is_always_on_top_recursive(window_id)) {
 		[wd.window_object setLevel:NSFloatingWindowLevel];
 	}
-
-	// Force window resize event and redraw.
-	[self windowDidResize:notification];
 }
 
 - (BOOL)windowShouldZoom:(NSWindow *)window toFrame:(NSRect)newFrame {

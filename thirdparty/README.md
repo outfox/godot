@@ -1049,6 +1049,8 @@ Patches:
 - `0007-shield-duplicate-macos.patch` ([GH-115510](https://github.com/godotengine/godot/pull/115510))
 - `0008-fix-linux-joycon-serial-num.patch` ([GH-113873](https://github.com/godotengine/godot/pull/113873))
 - `0009-update-device-blocklist.patch` ([GH-119403](https://github.com/godotengine/godot/pull/119403))
+- `0010-directinput-rumble-axes.patch` ([SDL rumble fix](https://github.com/libsdl-org/SDL/commit/3582beeb6914646c5e9d7498303565ab21fe2e1a))
+- `0011-optional-windows-joystick-backends.patch` ([SDL initialization fix](https://github.com/libsdl-org/SDL/commit/2c7856d6252cf1850ba75eb198d05437c13ba389))
 
 
 ## spirv-cross

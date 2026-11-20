@@ -1739,9 +1739,14 @@ Error FontFile::_load_bitmap_font(const String &p_path, List<String> *r_image_fi
 				case 5: /* kerning */ {
 					int pair_count = block_size / 10;
 					for (int i = 0; i < pair_count; i++) {
-						Vector2i kpk;
-						kpk.x = f->get_32();
-						kpk.y = f->get_32();
+						const uint32_t first = f->get_32();
+						const uint32_t second = f->get_32();
+						const int16_t amount = f->get_16();
+						if (first > 0x10FFFF || second > 0x10FFFF) {
+							WARN_PRINT("Invalid BMFont kerning character code.");
+							continue;
+						}
+						Vector2i kpk(first, second);
 						if (!unicode && encoding < 9) {
 							if (kpk.x >= 0x80 && kpk.x <= 0xFF) {
 								kpk.x = _oem_to_unicode[encoding][kpk.x - 0x80];
@@ -1756,7 +1761,7 @@ Error FontFile::_load_bitmap_font(const String &p_path, List<String> *r_image_fi
 								kpk.y = 0x00;
 							}
 						}
-						set_kerning(0, base_size, kpk, Vector2((int16_t)f->get_16(), 0));
+						set_kerning(0, base_size, kpk, Vector2(amount, 0));
 					}
 				} break;
 				default: {
@@ -1771,6 +1776,7 @@ Error FontFile::_load_bitmap_font(const String &p_path, List<String> *r_image_fi
 	} else {
 		// Text BMFont file.
 		f->seek(0);
+		int64_t page_count = UINT16_MAX;
 		bool unicode = false;
 		uint8_t encoding = 9;
 		while (true) {
@@ -1872,6 +1878,9 @@ Error FontFile::_load_bitmap_font(const String &p_path, List<String> *r_image_fi
 				}
 				set_fixed_size(base_size);
 			} else if (type == "common") {
+				if (keys.has("pages")) {
+					page_count = MIN(keys["pages"].to_int(), int64_t(UINT16_MAX));
+				}
 				if (keys.has("lineHeight")) {
 					height = keys["lineHeight"].to_int();
 				}
@@ -1908,10 +1917,8 @@ Error FontFile::_load_bitmap_font(const String &p_path, List<String> *r_image_fi
 					}
 				}
 			} else if (type == "page") {
-				int page = 0;
-				if (keys.has("id")) {
-					page = keys["id"].to_int();
-				}
+				const int64_t page = keys.has("id") ? keys["id"].to_int() : 0;
+				ERR_FAIL_INDEX_V_MSG(page, page_count, ERR_CANT_CREATE, "Invalid BMFont page index.");
 				if (keys.has("file")) {
 					String base_dir = p_path.get_base_dir();
 					String file = base_dir.path_join(keys["file"]);
@@ -2048,13 +2055,13 @@ Error FontFile::_load_bitmap_font(const String &p_path, List<String> *r_image_fi
 					set_glyph_texture_idx(0, Vector2i(base_size, 1), idx, texture_idx * (packed ? 4 : 1) + ch_off);
 				}
 			} else if (type == "kerning") {
-				Vector2i kpk;
-				if (keys.has("first")) {
-					kpk.x = keys["first"].to_int();
+				const int64_t first = keys.has("first") ? keys["first"].to_int() : 0;
+				const int64_t second = keys.has("second") ? keys["second"].to_int() : 0;
+				if (first < 0 || first > 0x10FFFF || second < 0 || second > 0x10FFFF) {
+					WARN_PRINT("Invalid BMFont kerning character code.");
+					continue;
 				}
-				if (keys.has("second")) {
-					kpk.y = keys["second"].to_int();
-				}
+				Vector2i kpk(first, second);
 				if (!unicode && encoding < 9) {
 					if (kpk.x >= 0x80 && kpk.x <= 0xFF) {
 						kpk.x = _oem_to_unicode[encoding][kpk.x - 0x80];

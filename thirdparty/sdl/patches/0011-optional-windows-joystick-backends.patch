@@ -1,0 +1,26 @@
+diff --git a/thirdparty/sdl/joystick/windows/SDL_windowsjoystick.c b/thirdparty/sdl/joystick/windows/SDL_windowsjoystick.c
+index e7fbfcb346..b84a184e19 100644
+--- a/thirdparty/sdl/joystick/windows/SDL_windowsjoystick.c
++++ b/thirdparty/sdl/joystick/windows/SDL_windowsjoystick.c
+@@ -331,18 +331,13 @@ void WINDOWS_JoystickQuit(void);
+
+ static bool WINDOWS_JoystickInit(void)
+ {
+-    if (!SDL_XINPUT_JoystickInit()) {
+-        WINDOWS_JoystickQuit();
+-        return false;
+-    }
++    WIN_InitDeviceNotification();
+
++    SDL_XINPUT_JoystickInit();
+     if (!SDL_DINPUT_JoystickInit()) {
+-        WINDOWS_JoystickQuit();
+-        return false;
++        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "DirectInput joystick initialization failed: %s", SDL_GetError());
+     }
+
+-    WIN_InitDeviceNotification();
+-
+ #if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
+     s_bJoystickThread = SDL_GetHintBoolean(SDL_HINT_JOYSTICK_THREAD, true);
+     if (s_bJoystickThread) {

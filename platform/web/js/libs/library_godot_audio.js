@@ -622,7 +622,7 @@ class SampleNode {
 			return;
 		}
 		this._source.connect(this.getPositionWorklet());
-		if (start) {
+		if (start && !this.isPaused) {
 			this.start();
 		}
 	}
@@ -745,14 +745,13 @@ class SampleNode {
 	 * @returns {void}
 	 */
 	_pause() {
-		if (!this.isStarted) {
-			return;
-		}
-		// 2dog: skip nodes cleared by AudioContext shutdown.
-		if (GodotAudio.ctx == null || this._source == null) {
+		if (this.isPaused || GodotAudio.ctx == null || this._source == null) {
 			return;
 		}
 		this.isPaused = true;
+		if (!this.isStarted) {
+			return;
+		}
 		this.pauseTime = (GodotAudio.ctx.currentTime - this._sourceStartTime) / this.getPlaybackRate();
 		this._source.stop();
 	}
@@ -762,7 +761,14 @@ class SampleNode {
 	 * @returns {void}
 	 */
 	_unpause() {
-		this._restart();
+		if (!this.isPaused) {
+			return;
+		}
+		if (this.isStarted) {
+			this._restart();
+		} else if (this._positionWorklet != null) {
+			this.start();
+		}
 		this.isPaused = false;
 		this.pauseTime = 0;
 	}
@@ -1711,7 +1717,7 @@ const _GodotAudio = {
 	},
 
 	godot_audio_sample_start__proxy: 'sync',
-	godot_audio_sample_start__sig: 'viiiifi',
+	godot_audio_sample_start__sig: 'viiiffi',
 	/**
 	 * Starts a sample.
 	 * @param {number} playbackObjectIdStrPtr Playback object id pointer

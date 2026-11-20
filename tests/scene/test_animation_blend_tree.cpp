@@ -32,9 +32,54 @@
 
 TEST_FORCE_LINK(test_animation_blend_tree)
 
+#include "scene/2d/node_2d.h"
 #include "scene/animation/animation_blend_tree.h"
+#include "scene/main/scene_tree.h"
+#include "scene/main/window.h"
 
 namespace TestAnimationBlendTree {
+
+class RepeatedInput : public AnimationNode {
+protected:
+	NodeTimeInfo _process(ProcessState &p_state, AnimationNodeInstance &p_instance, const AnimationMixer::PlaybackInfo &p_info, bool p_test_only) override {
+		AnimationMixer::PlaybackInfo info = p_info;
+		info.weight = 1.0;
+		const NodeTimeInfo result = blend_input(p_state, p_instance, 0, info, FILTER_IGNORE, true, p_test_only);
+		info.weight = 0.0;
+		blend_input(p_state, p_instance, 0, info, FILTER_IGNORE, true, p_test_only);
+		return result;
+	}
+
+public:
+	RepeatedInput() { add_input("clip"); }
+};
+
+TEST_CASE("[SceneTree][AnimationBlendTree] A queued blend retains its track weights when the input is revisited") {
+	Node2D *target = memnew(Node2D);
+	SceneTree::get_singleton()->get_root()->add_child(target);
+	AnimationTree *tree = memnew(AnimationTree);
+	target->add_child(tree);
+
+	const Ref<Animation> clip = memnew(Animation);
+	const int track = clip->add_track(Animation::TYPE_VALUE);
+	clip->track_set_path(track, NodePath(".:position"));
+	clip->track_insert_key(track, 0.0, Vector2(24, 0));
+	const Ref<AnimationLibrary> library = memnew(AnimationLibrary);
+	library->add_animation("clip", clip);
+	tree->add_animation_library("", library);
+
+	const Ref<AnimationNodeAnimation> source = memnew(AnimationNodeAnimation);
+	source->set_animation("clip");
+	const Ref<AnimationNodeBlendTree> blend = memnew(AnimationNodeBlendTree);
+	blend->add_node("clip", source);
+	blend->add_node("twice", Ref<AnimationNode>(memnew(RepeatedInput)));
+	blend->connect_node("twice", 0, "clip");
+	blend->connect_node("output", 0, "twice");
+	tree->set_root_animation_node(blend);
+	tree->advance(0.016);
+	CHECK(target->get_position() == Vector2(24, 0));
+	memdelete(target);
+}
 
 TEST_CASE("[SceneTree][AnimationBlendTree] Create AnimationBlendTree and add AnimationNode") {
 	Ref<AnimationNodeBlendTree> blend_tree;

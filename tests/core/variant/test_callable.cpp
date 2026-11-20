@@ -82,6 +82,16 @@ public:
 	void test_func_8(const Variant **p_args, int p_argcount, Callable::CallError &r_error) {}
 };
 
+TEST_CASE("[Callable] Equal method pointers have matching hashes") {
+	TestClass *object = memnew(TestClass);
+	const Callable method = callable_mp(object, &TestClass::test_func_1);
+	const Callable same_method = callable_mp(object, &TestClass::test_func_1);
+	CHECK(method == same_method);
+	CHECK_EQ(method.hash(), same_method.hash());
+	CHECK(method != callable_mp(object, &TestClass::test_func_2));
+	memdelete(object);
+}
+
 TEST_CASE("[Callable] Argument count") {
 	TestClass *my_test = memnew(TestClass);
 
