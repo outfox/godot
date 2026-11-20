@@ -527,7 +527,9 @@ const GodotDisplay = {
 	godot_js_display_canvas_size_get__deps: ['$findCanvasEventTarget'],
 	godot_js_display_canvas_size_get__sig: 'iiii',
 	godot_js_display_canvas_size_get: function (p_selector, p_width, p_height) {
-		const canvas = findCanvasEventTarget(p_selector);
+		const transferred = Module['godotWebGPUCanvasSelector'];
+		const canvas = transferred && GodotRuntime.parseString(p_selector) === transferred
+			? GodotConfig.canvas : findCanvasEventTarget(p_selector);
 		if (!canvas) {
 			return 0;
 		}

@@ -126,11 +126,15 @@ Godot['prepareWorkerWebGPU'] = async (module, canvas) => {
 	const failed = new Promise((resolve, reject) => { workerFailed = () => reject(new Error('The WebGPU worker failed.')); });
 	worker.addEventListener('error', workerFailed);
 	try {
+		const canvasToken = crypto.randomUUID();
+		const canvasSelector = `[data-godot-webgpu="${canvasToken}"]`;
 		const ready = reply();
-		worker.postMessage({ 'godotWebGPU': port2, 'canvasSelector': `#${canvas.id}` }, [port2]);
+		worker.postMessage({ 'godotWebGPU': port2, 'canvasSelector': canvasSelector }, [port2]);
 		await Promise.race([ready, failed]);
 		const offscreen = canvas.transferControlToOffscreen();
 		module['godotWebGPUSize'] = { width: offscreen.width, height: offscreen.height };
+		canvas.setAttribute('data-godot-webgpu', canvasToken);
+		module['godotWebGPUCanvasSelector'] = canvasSelector;
 		const attached = reply();
 		port1.postMessage(offscreen, [offscreen]);
 		await Promise.race([attached, failed]);

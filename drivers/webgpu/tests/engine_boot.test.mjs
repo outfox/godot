@@ -16,7 +16,7 @@ test('surface resize measures the selected canvas after transfer', () => {
     const context = {
         LibraryManager: { library }, autoAddDeps() {}, mergeInto: Object.assign,
         GodotConfig: { canvas: game }, Module: {},
-        GodotRuntime: { setHeapValue: (index, value) => { heap[index] = value; } },
+        GodotRuntime: { parseString: value => value, setHeapValue: (index, value) => { heap[index] = value; } },
         findCanvasEventTarget: selector => ({ '#embedded-game': game, '#preview': other })[selector],
     };
     vm.runInNewContext(readFileSync(new URL('../../../platform/web/js/libs/library_godot_display.js', import.meta.url), 'utf8'), context);
@@ -24,6 +24,9 @@ test('surface resize measures the selected canvas after transfer', () => {
     assert.equal(size('#embedded-game', 0, 1), 1);
     assert.deepEqual(heap, [320, 240]);
     context.Module.godotWebGPUSize = { width: 800, height: 600 };
+    context.Module.godotWebGPUCanvasSelector = '[data-godot-webgpu="test"]';
+    assert.equal(size(context.Module.godotWebGPUCanvasSelector, 0, 1), 1);
+    assert.deepEqual(heap, [800, 600]);
     assert.equal(size('#embedded-game', 0, 1), 1);
     assert.deepEqual(heap, [800, 600]);
     assert.equal(size('#preview', 0, 1), 1);
