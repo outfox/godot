@@ -1113,6 +1113,8 @@ Patches:
 - `0005-ios-link.patch` ([GH-123903](https://github.com/godotengine/godot/pull/123903))
 - `0006-ios-iostream-no-prefpath.patch` ([GH-123899](https://github.com/godotengine/godot/pull/123899))
 - `0007-fix-linux-getenv-unsafe.patch` ([GH-124017](https://github.com/godotengine/godot/pull/124017))
+- `0008-fix-gameinput-and-2c-paddles.patch` releases the DLL on rejected GameInput initialization
+  and reads Ultimate 2C paddles from their model-specific report byte.
 
 
 ## smaa

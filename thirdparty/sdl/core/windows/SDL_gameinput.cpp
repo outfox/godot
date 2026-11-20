@@ -39,6 +39,7 @@ bool SDL_InitGameInput(IGameInput **ppGameInput)
         }
 
         if (WIN_HasBrokenEZFRD64DLL()) {
+            SDL_UnloadObject(g_hGameInputDLL);
             return SDL_SetError("GameInput disabled to prevent application crashing");
         }
 

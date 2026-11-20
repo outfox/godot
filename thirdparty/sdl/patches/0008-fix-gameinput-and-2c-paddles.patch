@@ -1,0 +1,26 @@
+diff --git a/thirdparty/sdl/core/windows/SDL_gameinput.cpp b/thirdparty/sdl/core/windows/SDL_gameinput.cpp
+index fb3b942d32..4d535fd736 100644
+--- a/thirdparty/sdl/core/windows/SDL_gameinput.cpp
++++ b/thirdparty/sdl/core/windows/SDL_gameinput.cpp
+@@ -39,6 +39,7 @@ bool SDL_InitGameInput(IGameInput **ppGameInput)
+         }
+ 
+         if (WIN_HasBrokenEZFRD64DLL()) {
++            SDL_UnloadObject(g_hGameInputDLL);
+             return SDL_SetError("GameInput disabled to prevent application crashing");
+         }
+ 
+diff --git a/thirdparty/sdl/joystick/hidapi/SDL_hidapi_8bitdo.c b/thirdparty/sdl/joystick/hidapi/SDL_hidapi_8bitdo.c
+index a89d2f3503..e020029bfd 100644
+--- a/thirdparty/sdl/joystick/hidapi/SDL_hidapi_8bitdo.c
++++ b/thirdparty/sdl/joystick/hidapi/SDL_hidapi_8bitdo.c
+@@ -616,7 +616,8 @@ static void HIDAPI_Driver8BitDo_HandleStatePacket(SDL_Joystick *joystick, SDL_Dr
+         }
+     }
+ 
+-    if (size > 10 && ctx->last_state[10] != data[10]) {
++    // The Ultimate 2C already reported L4/R4 in byte 8.
++    if (joystick->nbuttons > SDL_GAMEPAD_BUTTON_8BITDO_PR && size > 10 && ctx->last_state[10] != data[10]) {
+         SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_8BITDO_L4, ((data[10] & 0x01) != 0));
+         SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_8BITDO_R4, ((data[10] & 0x02) != 0));
+     }

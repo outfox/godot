@@ -616,7 +616,8 @@ static void HIDAPI_Driver8BitDo_HandleStatePacket(SDL_Joystick *joystick, SDL_Dr
         }
     }
 
-    if (size > 10 && ctx->last_state[10] != data[10]) {
+    // The Ultimate 2C already reported L4/R4 in byte 8.
+    if (joystick->nbuttons > SDL_GAMEPAD_BUTTON_8BITDO_PR && size > 10 && ctx->last_state[10] != data[10]) {
         SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_8BITDO_L4, ((data[10] & 0x01) != 0));
         SDL_SendJoystickButton(timestamp, joystick, SDL_GAMEPAD_BUTTON_8BITDO_R4, ((data[10] & 0x02) != 0));
     }
