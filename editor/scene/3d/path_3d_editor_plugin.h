@@ -193,10 +193,10 @@ private:
 		Vector3 origin;
 		Point2 mouse_pos;
 		bool show_rotation_line = false;
-		Ref<Path3DGizmo> gizmo;
+		ObjectID gizmo_id;
 		int gizmo_handle = 0;
 		bool gizmo_handle_secondary = false;
-		Camera3D *gizmo_camera;
+		Camera3D *gizmo_camera = nullptr;
 		bool waiting_point_physics = false;
 		bool waiting_handle_physics = false;
 		bool in_physics_frame = false;
