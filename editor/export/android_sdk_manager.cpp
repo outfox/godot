@@ -95,10 +95,31 @@ void AndroidSDKManager::_notification(int p_what) {
 
 				case INSTALLING_ANDROID_SDK: {
 					if (setup_android_pid > 0) {
-						if (!OS::get_singleton()->is_process_running(setup_android_pid)) {
+						bool running = OS::get_singleton()->is_process_running(setup_android_pid);
+						bool received_output = false;
+						for (int i = 0; i < 2; i++) {
+							uint8_t buffer[8192];
+							uint64_t size = package_pipes[i]->get_buffer(buffer, sizeof(buffer));
+							if (size > 0 && size <= sizeof(buffer)) {
+								package_output[i].append_array(Span(buffer, size));
+								received_output = true;
+							}
+						}
+						if (!running && !received_output) {
+							for (int i = 0; i < 2; i++) {
+								if (!package_output[i].is_empty()) {
+									execute_outputs->add_text(String::utf8((const char *)package_output[i].ptr(), package_output[i].size()));
+									package_output[i].clear();
+								}
+								package_pipes[i].unref();
+							}
 							int exit_code = OS::get_singleton()->get_process_exit_code(setup_android_pid);
-							print_verbose("Exit code: " + itos(exit_code));
-							_android_sdk_installed(exit_code);
+							setup_android_pid = -1;
+							if (exit_code != 0) {
+								_android_sdk_install_failed(vformat(TTR("Android SDK package installation failed with exit code %d."), exit_code));
+							} else {
+								_install_android_sdk_packages();
+							}
 						}
 					}
 				} break;
@@ -253,6 +274,10 @@ void AndroidSDKManager::_hide_setup_dialog(SetupStatus p_status) {
 		case INSTALLING_ANDROID_SDK: {
 			setup_android_pid = -1;
 			index_sdk_package_being_installed = 0;
+			for (int i = 0; i < 2; i++) {
+				package_pipes[i].unref();
+				package_output[i].clear();
+			}
 		} break;
 		default: {
 		} break;
@@ -291,10 +316,6 @@ void AndroidSDKManager::run_setup(const Callable &p_on_setup_completed, const Ca
 
 void AndroidSDKManager::_install_android_sdk_packages() {
 	String cli_bin = get_android_cli_path();
-	if (!FileAccess::exists(cli_bin)) {
-		ERR_PRINT("Unable to find android-cli binary");
-		return;
-	}
 
 	String default_android_sdk_path = EditorPaths::get_singleton()->get_default_android_sdk_path();
 
@@ -311,7 +332,7 @@ void AndroidSDKManager::_install_android_sdk_packages() {
 	}
 	if (index_sdk_package_being_installed >= ANDROID_SDK_PACKAGES_COUNT) {
 		// No more required packages to install.
-		_android_sdk_installed(0);
+		_android_sdk_installed();
 		return;
 	}
 
@@ -320,42 +341,34 @@ void AndroidSDKManager::_install_android_sdk_packages() {
 	print_verbose("Requesting Android SDK package " + package);
 	cli_args.push_back(package);
 
-	Error error = OS::get_singleton()->create_process(cli_bin, cli_args, &setup_android_pid);
-	if (error != OK || setup_android_pid == -1) {
-		ERR_PRINT(vformat("Installation of Android SDK package %s failed.", package));
-		_cancel_setup();
-		return;
-	}
-
 	_show_setup_dialog(INSTALLING_ANDROID_SDK, false, false);
 	execute_outputs->add_text(vformat(TTR("Installing Android SDK package: %s"), package) + "\n");
+	Dictionary process = OS::get_singleton()->execute_with_pipe(cli_bin, cli_args, false);
+	if (!process.has("pid")) {
+		_android_sdk_install_failed(vformat(TTR("Could not start the Android SDK installer: %s"), cli_bin));
+		return;
+	}
+	setup_android_pid = process["pid"];
+	package_pipes[0] = process["stdio"];
+	package_pipes[1] = process["stderr"];
 }
 
-void AndroidSDKManager::_android_sdk_installed(int p_exit_code) {
-	if (p_exit_code != 0) {
-		ERR_PRINT("Installation of Android SDK packages failed. Check output for the error.");
-		execute_outputs->add_text(TTR("Installation of Android SDK packages failed. Check output for the error."));
-		_cancel_setup();
-	} else {
-		if (index_sdk_package_being_installed < ANDROID_SDK_PACKAGES_COUNT) {
-			// Continue installing the other sdk packages.
-			_install_android_sdk_packages();
-		} else {
-			// Done installing all the Android sdk packages.
-			String default_android_sdk_path = EditorPaths::get_singleton()->get_default_android_sdk_path();
-			print_verbose("Installed Android SDK packages to " + default_android_sdk_path);
-			// Update the editor settings.
-			EditorSettings::get_singleton()->set_setting("export/android/android_sdk_path", default_android_sdk_path);
-			EditorSettings::get_singleton()->save();
+void AndroidSDKManager::_android_sdk_install_failed(const String &p_message) {
+	ERR_PRINT(p_message);
+	setup_label->set_text(p_message);
+	setup_progress_bar->hide();
+	set_process(false);
+}
 
-			_hide_setup_dialog(current_setup_status);
-			emit_signal(SNAME("android_sdk_installed"));
+void AndroidSDKManager::_android_sdk_installed() {
+	String default_android_sdk_path = EditorPaths::get_singleton()->get_default_android_sdk_path();
+	EditorSettings::get_singleton()->set_setting("export/android/android_sdk_path", default_android_sdk_path);
+	EditorSettings::get_singleton()->save();
 
-			// Run the next setup step.
-			if (on_setup_completed.is_valid()) {
-				on_setup_completed.call_deferred();
-			}
-		}
+	_hide_setup_dialog(current_setup_status);
+	emit_signal(SNAME("android_sdk_installed"));
+	if (on_setup_completed.is_valid()) {
+		on_setup_completed.call_deferred();
 	}
 }
 
@@ -368,7 +381,7 @@ void AndroidSDKManager::_setup_android_sdk() {
 	if (_is_android_sdk_setup(EditorPaths::get_singleton()->get_default_android_sdk_path())) {
 		// Check if the Android SDK is already set up in the default path. If it's, we just update the editor settings
 		// to point to the default Android SDK path.
-		_android_sdk_installed(0);
+		_android_sdk_installed();
 	} else {
 		if (_is_online()) {
 			String cli_bin = get_android_cli_path();
