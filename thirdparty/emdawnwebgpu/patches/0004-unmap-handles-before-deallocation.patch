@@ -1,0 +1,35 @@
+--- a/thirdparty/emdawnwebgpu/webgpu/src/webgpu.cpp
++++ b/thirdparty/emdawnwebgpu/webgpu/src/webgpu.cpp
+@@ -173,6 +173,12 @@
+   explicit RefCounted(ImportedFromJSTag) : mIsImportedFromJS(true) {}
+   RefCounted() = default;
+ 
++  // Destructors can use the JS object. Remove its mapping before another thread can reuse the address.
++  static void operator delete(void* ptr) noexcept {
++    emwgpuDelete(ptr);
++    ::operator delete(ptr);
++  }
++
+   void AddRef() {
+     [[maybe_unused]] uint64_t oldRefCount =
+         mRefCount.fetch_add(1u, std::memory_order_relaxed);
+@@ -290,11 +296,6 @@
+   static void Release(T* value) {
+     if (value != nullptr && value->RefCounted::Release()) {
+       delete value;
+-      // emwgpuDelete() removes the pointer from the jsObjects mapping.
+-      // Considering some class implementation may need to use it in
+-      // destructor, we call emwgpuDelete() after the pointer delete.
+-      // This also applies to implementation of `wgpu{Type}Release`.
+-      emwgpuDelete(value);
+     }
+   }
+ 
+@@ -1805,7 +1806,6 @@
+   void wgpu##Name##Release(WGPU##Name o) {       \
+     if (o->Release()) {                          \
+       delete o;                                  \
+-      emwgpuDelete(o);                           \
+     }                                            \
+   }
+ WGPU_OBJECTS(DEFINE_WGPU_DEFAULT_ADDREF_RELEASE)

@@ -13,7 +13,7 @@ with fewer than 40 sampled textures or 10 storage buffers per stage. Without
 `texture-formats-tier2` read/write storage (Firefox, lavapipe), Forward+ runs
 with SDFGI and VoxelGI disabled and the raster depth of field, warning once per
 feature a scene asks for; SSIL is disabled only on adapters with tier1 but not
-tier2. Android, double-precision and multithreaded browser runtimes
+tier2. Android and double-precision runtimes
 reject WebGPU explicitly. Texture streaming is unavailable: its feedback needs
 subgroups, so a project that enables it warns once and loads full-resolution
 textures, like the Compatibility renderer.
@@ -38,7 +38,25 @@ uv run scons -C <godot-checkout> platform=web target=template_debug library_type
 uses the Emscripten 3.x stack dependency names; newer SDKs use the original
 JavaScript. Tint also retains a locale-independent float parser for older libc++.
 An explicit local `.py` port or `webgpu_port=emdawnwebgpu` may be supplied for
-other toolchains; the remote port requires Emscripten 4.0.10 or later.
+single-threaded builds on other toolchains. The remote port requires Emscripten 4.0.10 or later.
+
+The threaded browser prototype uses the patched port. Build it from 2dog with
+`uv run build-godot.py --platform web --target template_release --threads --webgpu yes`.
+The .NET shell transfers an OffscreenCanvas to Godot's deputy pthread after
+the worker acquires a device. The worker encodes commands and submits directly
+to the canvas. It also services other pthreads' GPU requests during blocking
+waits. Readback callbacks are polled on the pthread that requested them.
+Hosts supplying a main-thread device retain the proxied presentation path.
+
+To test the port independently, run these commands from the outer checkout
+with the pinned SDK active. Open `http://localhost:8000/port.html` in a WebGPU
+browser and look for `THREADED_WEBGPU_PORT_PASSED` in its console.
+
+```sh
+mkdir -p temp/threaded-port
+em++ godot/drivers/webgpu/tests/threaded_browser_port.cpp --use-port=godot/thirdparty/emdawnwebgpu/emdawnwebgpu.port.py -pthread -sPTHREAD_POOL_SIZE=2 -sWASM_BIGINT -sASSERTIONS=1 -O1 -o temp/threaded-port/port.html
+node .github/scripts/serve-isolated.mjs temp/threaded-port 8000
+```
 
 On Windows, keep the Emscripten cache on the SDK's drive to avoid the 3.1.56
 system-library builder's cross-drive path limitation. Use separate native and

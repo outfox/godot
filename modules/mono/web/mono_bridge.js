@@ -111,3 +111,34 @@ const Godot = async (moduleConfig) => { // eslint-disable-line no-unused-vars
 	Module.callMain = (args) => runMain(dotnetConfig.mainAssemblyName, args);
 	return Module;
 };
+
+Godot['prepareWorkerWebGPU'] = async (module, canvas) => {
+	const worker = Object.values(module['PThread']['pthreads']).find((thread) => thread['info']?.['isDeputy']);
+	if (!worker || !canvas.transferControlToOffscreen) {
+		throw new Error('The rendering worker or OffscreenCanvas is unavailable.');
+	}
+	const { port1, port2 } = new MessageChannel();
+	const reply = () => new Promise((resolve, reject) => {
+		port1.onmessage = ({ data }) => data === true ? resolve() : reject(new Error(data));
+		port1.onmessageerror = () => reject(new Error('The WebGPU worker reply could not be read.'));
+	});
+	let workerFailed;
+	const failed = new Promise((resolve, reject) => { workerFailed = () => reject(new Error('The WebGPU worker failed.')); });
+	worker.addEventListener('error', workerFailed);
+	try {
+		const ready = reply();
+		worker.postMessage({ 'godotWebGPU': port2 }, [port2]);
+		await Promise.race([ready, failed]);
+		const offscreen = canvas.transferControlToOffscreen();
+		module['godotWebGPUSize'] = { width: offscreen.width, height: offscreen.height };
+		const attached = reply();
+		port1.postMessage(offscreen, [offscreen]);
+		await Promise.race([attached, failed]);
+	} catch (err) {
+		port1.postMessage(null);
+		throw err;
+	} finally {
+		worker.removeEventListener('error', workerFailed);
+		port1.close();
+	}
+};

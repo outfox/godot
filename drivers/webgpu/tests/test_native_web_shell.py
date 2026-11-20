@@ -37,7 +37,9 @@ class EngineShellTests(unittest.TestCase):
         for closure in (False, True):
             for threads, precision, webgpu, message in (
                 (False, "single", True, ""),
-                (True, "single", False, "multithreaded browser"),
+                (True, "single", True, ""),
+                (True, "single", False, "not included"),
+                (True, "double", False, "double-precision"),
                 (False, "double", False, "double-precision"),
                 (False, "single", False, "not included"),
             ):
