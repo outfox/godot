@@ -268,8 +268,12 @@ def configure(env: "SConsEnvironment"):
         # Emscripten 4.0.10+ uses the emdawnwebgpu port; -sUSE_WEBGPU=1 was removed in 5.0.
         # Pass --use-port=emdawnwebgpu to both CCFLAGS (for headers) and LINKFLAGS (for JS glue).
         port = env["webgpu_port"]
+        pinned_port = Path(env.File("#thirdparty/emdawnwebgpu/emdawnwebgpu.port.py").abspath)
         if port == "auto":
-            port = env.File("#thirdparty/emdawnwebgpu/emdawnwebgpu.port.py").abspath.replace("\\", "/")
+            port = pinned_port.as_posix()
+        elif env["threads"] and Path(port).resolve() != pinned_port.resolve():
+            print_error("Threaded WebGPU requires the patched Emdawnwebgpu port. Select webgpu_port=auto.")
+            sys.exit(255)
         if cc_semver < (4, 0, 10) and port == "emdawnwebgpu":
             print_error(
                 "WebGPU on Emscripten < 4.0.10 requires webgpu_port=<local emdawnwebgpu.port.py>; keep the .NET Emscripten version pinned."

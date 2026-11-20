@@ -209,11 +209,6 @@ def prepare(root=ROOT, cache=None, offline=False, verify=False, platform=None):
                 raise ValueError(f"Unexpected source selection for {name}: {len(selected_files[name])} files")
         if "spirv-tools" in pending:
             generate_spirv_tables(stage, archives, specs)
-        if "emdawnwebgpu" in pending:
-            source = stage / "thirdparty/emdawnwebgpu/webgpu/src/library_webgpu.js"
-            source.with_name("library_webgpu_legacy.js").write_bytes(
-                source.read_bytes().replace(b"'$stackSave', '$stackRestore'", b"'stackSave', 'stackRestore'")
-            )
         for name in pending:
             for patch in sorted((root / "thirdparty" / name / "patches").glob("*.patch")):
                 # Prevent Git from discovering the surrounding Godot/2dog worktree.
@@ -224,6 +219,11 @@ def prepare(root=ROOT, cache=None, offline=False, verify=False, platform=None):
                     input=patch.read_bytes().replace(b"\r\n", b"\n"),
                     env={**os.environ, "GIT_CEILING_DIRECTORIES": str(stage.parent)},
                 )
+        if "emdawnwebgpu" in pending:
+            source = stage / "thirdparty/emdawnwebgpu/webgpu/src/library_webgpu.js"
+            source.with_name("library_webgpu_legacy.js").write_bytes(
+                source.read_bytes().replace(b"'$stackSave', '$stackRestore'", b"'stackSave', 'stackRestore'")
+            )
         for name in pending:
             hashes = {}
             for file, previous in states[name].get("files", {}).items():

@@ -297,9 +297,7 @@ bool profile_gpu = false;
 static const String NULL_DISPLAY_DRIVER("headless");
 
 static const char *webgpu_unavailable_reason() {
-#if defined(WEB_ENABLED) && defined(THREADS_ENABLED)
-	return "WebGPU is unavailable in multithreaded browser runtimes. Use a single-threaded runtime or OpenGL Compatibility.";
-#elif defined(REAL_T_IS_DOUBLE)
+#if defined(REAL_T_IS_DOUBLE)
 	return "WebGPU is unavailable in double-precision runtimes. Use a single-precision runtime or another rendering driver.";
 #elif defined(ANDROID_ENABLED)
 	return "WebGPU is unavailable on Android. Use Vulkan or OpenGL Compatibility.";

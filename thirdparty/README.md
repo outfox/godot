@@ -257,15 +257,11 @@ Files extracted from upstream source (restored using `drivers/webgpu/dependencie
 - `webgpu/` and `webgpu_cpp/` folders, including their `LICENSE` files
 - `emdawnwebgpu.port.py`, `README.md`, `VERSION.txt`
 
-Preparation derives `webgpu/src/library_webgpu_legacy.js`, changing only the
-stackSave/stackRestore JS-library dependency names to their Emscripten 3.x
-spelling for the pinned 3.1.56 .NET toolchain. Modern SDKs use the unmodified
-upstream JavaScript library.
-
-Patches:
-
-- `0001-select-legacy-stack-dependencies.patch` — Select the legacy JavaScript
-  library on Emscripten 3.x.
+Preparation applies the [Emdawnwebgpu patch stack](emdawnwebgpu/patches/README.md)
+for legacy stack selection, pthread proxying, thread-affine callbacks, handle
+lifetimes and device-owner routing. Modern SDKs use the patched JavaScript.
+Preparation derives `webgpu/src/library_webgpu_legacy.js` from it by changing
+the stackSave/stackRestore dependency names for Emscripten 3.x.
 
 
 ## enet

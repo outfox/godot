@@ -77,13 +77,15 @@ bool DisplayServerWeb::check_size_force_redraw() {
 		Size2i window_size = window_get_size();
 		Variant size = Rect2i(Point2i(), window_size); // TODO use window_get_position if implemented.
 		rect_changed_callback.call(size);
-		emscripten_set_canvas_element_size(canvas_id, window_size.x, window_size.y);
 #ifdef WEBGPU_ENABLED
-		// Also update the rendering context surface so the swap chain resizes correctly.
 		if (rendering_context != nullptr) {
+			// Surface configuration resizes the canvas on the WebGPU device's thread.
 			rendering_context->window_set_size(DisplayServerEnums::MAIN_WINDOW_ID, window_size.x, window_size.y);
-		}
+		} else
 #endif
+		{
+			emscripten_set_canvas_element_size(canvas_id, window_size.x, window_size.y);
+		}
 	}
 	return size_changed;
 }

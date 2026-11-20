@@ -30,6 +30,10 @@
 
 #include "rendering_device_graph.h"
 
+#if defined(WEBGPU_ENABLED) && defined(PROXY_TO_PTHREAD_ENABLED)
+#include "drivers/webgpu/webgpu_device_thread.h"
+#endif
+
 #define PRINT_RENDER_GRAPH 0
 #define FORCE_FULL_ACCESS_BITS 0
 #define PRINT_RESOURCE_TRACKER_TOTAL 0
@@ -1112,6 +1116,25 @@ void RenderingDeviceGraph::_wait_for_secondary_command_buffer_tasks() {
 }
 
 void RenderingDeviceGraph::_run_render_commands(int32_t p_level, const RecordedCommandSort *p_sorted_commands, uint32_t p_sorted_commands_count, RDD::CommandBufferID &r_command_buffer, CommandBufferPool &r_command_buffer_pool, int32_t &r_current_label_index, int32_t &r_current_label_level) {
+#if defined(WEBGPU_ENABLED) && defined(PROXY_TO_PTHREAD_ENABLED)
+	// Encode a recorded group where the GPUDevice lives. Keep user callbacks on the rendering thread.
+	if (pthread_self() != emwgpuGetDeviceThread()) {
+		bool has_callback = false;
+		for (uint32_t i = 0; i < p_sorted_commands_count; i++) {
+			const uint32_t offset = command_data_offsets[p_sorted_commands[i].index];
+			if (reinterpret_cast<const RecordedCommand *>(&command_data[offset])->type == RecordedCommand::TYPE_DRIVER_CALLBACK) {
+				has_callback = true;
+				break;
+			}
+		}
+		if (!has_callback) {
+			webgpu_on_device_thread([&] {
+				_run_render_commands(p_level, p_sorted_commands, p_sorted_commands_count, r_command_buffer, r_command_buffer_pool, r_current_label_index, r_current_label_level);
+			});
+			return;
+		}
+	}
+#endif
 	driver->command_group_begin(r_command_buffer);
 	for (uint32_t i = 0; i < p_sorted_commands_count; i++) {
 		const uint32_t command_index = p_sorted_commands[i].index;

@@ -57,6 +57,9 @@ sys_env.AddJSLibraries([
     "js/libs/library_godot_webgl2.js",
     "js/libs/library_godot_debugger.js",
 ])
+if env["threads"] and env["webgpu"]:
+    sys_env.AddJSPre(["js/engine/webgpu_device.js", "js/patches/webgpu_worker.js"])
+
 sys_env.AddJSExterns([
     "js/libs/library_godot_webgl2.externs.js",
 ])
@@ -175,6 +178,7 @@ engine = [
     "js/engine/features.js",
     "js/engine/preloader.js",
     "js/engine/config.js",
+    "js/engine/webgpu_device.js",
     "js/engine/engine.js",
 ]
 if env["target"] == "editor":

@@ -1,0 +1,59 @@
+--- a/thirdparty/emdawnwebgpu/webgpu/src/webgpu.cpp
++++ b/thirdparty/emdawnwebgpu/webgpu/src/webgpu.cpp
+@@ -8,6 +8,9 @@
+ //
+ 
+ #include <emscripten/emscripten.h>
++#ifdef __wasm_atomics__
++#include <pthread.h>
++#endif
+ #include <webgpu/webgpu.h>
+ 
+ #include <array>
+@@ -440,6 +443,9 @@
+   // Events need to keep track of the instance they came from for validation.
+   const InstanceID mInstanceId;
+   const WGPUCallbackMode mMode;
++#ifdef __wasm_atomics__
++  const pthread_t mRequestThread = pthread_self();
++#endif
+   bool mIsReady = false;
+ };
+ 
+@@ -490,6 +496,7 @@
+   void UnregisterInstance(InstanceID instance) {
+     assert(instance);
++    std::vector<std::pair<FutureID, std::unique_ptr<TrackedEvent>>> cancelled;
+     std::unique_lock<std::mutex> lock(mMutex);
+     auto instanceIt = mPerInstanceEvents.find(instance);
+     assert(instanceIt != mPerInstanceEvents.end());
+ 
+@@ -499,10 +506,15 @@
+       if (auto futureIdsIt = mEvents.find(futureId);
+           futureIdsIt != mEvents.end()) {
+-        futureIdsIt->second->Complete(futureId, EventCompletionType::Shutdown);
++        cancelled.emplace_back(futureId, std::move(futureIdsIt->second));
+         mEvents.erase(futureIdsIt);
+       }
+     }
+     mPerInstanceEvents.erase(instance);
++    lock.unlock();
++    // A shutdown callback can release a JS object while the browser is marking another future ready.
++    for (auto& [futureId, event] : cancelled) {
++      event->Complete(futureId, EventCompletionType::Shutdown);
++    }
+   }
+ 
+   void ProcessEvents(InstanceID instance) {
+@@ -526,7 +538,11 @@
+         }
+         auto& event = eventIt->second;
+ 
+         if (event->mMode == WGPUCallbackMode_AllowProcessEvents &&
++#ifdef __wasm_atomics__
++            // Local rendering devices share an instance but own their readback buffers on separate threads.
++            pthread_equal(event->mRequestThread, pthread_self()) &&
++#endif
+             event->mIsReady) {
+           completable.emplace_back(futureId, std::move(event));
+           mEvents.erase(eventIt);

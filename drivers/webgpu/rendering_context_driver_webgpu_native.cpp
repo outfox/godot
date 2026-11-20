@@ -158,7 +158,7 @@ Error RenderingContextDriverWebGPU::initialize_native() {
 		limits.maxSampledTexturesPerShaderStage = MIN(limits.maxSampledTexturesPerShaderStage, (uint32_t)sampled_texture_limit.to_int());
 	}
 	Vector<WGPUFeatureName> features;
-	// Keep in sync with requestWebGPUDevice in platform/web/js/engine/engine.js (the last feature is Dawn-only).
+	// Keep in sync with platform/web/js/engine/webgpu_device.js. The last feature is Dawn-only.
 	const WGPUFeatureName optional_features[] = {
 		WGPUFeatureName_Depth32FloatStencil8,
 		WGPUFeatureName_Float32Filterable,

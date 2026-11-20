@@ -37,8 +37,10 @@
 // html5_webgpu.h was removed in Emscripten 5.x when USE_WEBGPU was dropped.
 // Device is now created from C++ using the emdawnwebgpu port's Dawn API.
 #ifdef WEB_ENABLED
+#include "platform/web/godot_js.h"
+#include "webgpu_device_thread.h"
+
 #include <emscripten/emscripten.h>
-#include <emscripten/html5.h>
 #include <cstdlib>
 EM_JS_DEPS(webgpu_context, "$stringToNewUTF8");
 #endif
@@ -77,6 +79,13 @@ Error RenderingContextDriverWebGPU::initialize() {
 #ifndef WEB_ENABLED
 	return initialize_native();
 #else
+#ifdef THREADS_ENABLED
+	if (pthread_self() != emwgpuGetDeviceThread()) {
+		Error result = ERR_CANT_CREATE;
+		webgpu_on_device_thread([&] { result = initialize(); });
+		return result;
+	}
+#endif
 	// The HTML shell pre-initializes a GPUDevice and stores it in Module.preinitializedWebGPUDevice.
 	// We use the emdawnwebgpu port's WebGPU.importJsDevice() to wrap it in a C WGPUDevice handle.
 	// Note: emdawnwebgpu is a thin JS wrapper around the browser's WebGPU API.
@@ -86,17 +95,15 @@ Error RenderingContextDriverWebGPU::initialize() {
 	// processes async callbacks (buffer map readback, query results, etc.).
 	WGPUInstanceDescriptor inst_desc = {};
 	instance = wgpuCreateInstance(&inst_desc);
-	if (!instance) {
-		WARN_PRINT("WebGPU: wgpuCreateInstance returned null — async readback may not work.");
-	}
+	ERR_FAIL_NULL_V(instance, ERR_CANT_CREATE);
 
 	device = (WGPUDevice)(uintptr_t)EM_ASM_PTR({
 		var d = Module["preinitializedWebGPUDevice"];
 		if (!d) {
 			return 0;
 		}
-		return WebGPU["importJsDevice"](d);
-	});
+		return WebGPU["importJsDevice"](d, $0);
+	}, instance);
 	ERR_FAIL_COND_V_MSG(device == nullptr, ERR_CANT_CREATE, "WebGPU: Failed to get pre-initialized device. Ensure JS shell calls navigator.gpu.requestDevice() before WASM.");
 
 	queue = wgpuDeviceGetQueue(device);
@@ -175,8 +182,8 @@ RenderingContextDriver::SurfaceID RenderingContextDriverWebGPU::surface_create(c
 
 	SurfaceID id = next_surface_id++;
 	Surface &surface = surfaces[id];
-	surface.handle = wgpu_surface;
 	surface.canvas_selector = canvas_selector;
+	surface.handle = wgpu_surface;
 	surface.format = EM_ASM_INT({ return navigator.gpu.getPreferredCanvasFormat() === 'rgba8unorm'; }) ? WGPUTextureFormat_RGBA8Unorm : WGPUTextureFormat_BGRA8Unorm;
 	surface.width = 0;
 	surface.height = 0;
@@ -192,7 +199,7 @@ void RenderingContextDriverWebGPU::surface_set_size(SurfaceID p_surface, uint32_
 #ifdef WEB_ENABLED
 	int canvas_width = 0;
 	int canvas_height = 0;
-	if (emscripten_get_canvas_element_size(surface.canvas_selector.utf8().get_data(), &canvas_width, &canvas_height) == EMSCRIPTEN_RESULT_SUCCESS) {
+	if (godot_js_display_canvas_size_get(surface.canvas_selector.utf8().get_data(), &canvas_width, &canvas_height)) {
 		p_width = MAX(canvas_width, 0);
 		p_height = MAX(canvas_height, 0);
 	}

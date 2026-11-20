@@ -1,0 +1,28 @@
+--- a/thirdparty/emdawnwebgpu/webgpu/src/library_webgpu.js
++++ b/thirdparty/emdawnwebgpu/webgpu/src/library_webgpu.js
+@@ -2710,6 +2710,25 @@
+   // --------------------------------------------------------------------------
+ };
+ 
++#if PTHREADS
++// Keep the device, canvas and JS handle table on the browser main thread.
++for (const [name, fn] of Object.entries(LibraryWebGPU)) {
++  if (typeof fn === 'function' && !name.startsWith('$')) {
++    LibraryWebGPU[name + '__proxy'] = 'sync';
++  }
++}
++// The 3.x pthread proxy returns a double. Convert the three i64 getters on the caller.
++for (const name of ['wgpuBufferGetSize', 'wgpuBufferGetUsage', 'wgpuTextureGetUsage']) {
++  const getter = name + 'Number';
++  LibraryWebGPU[getter] = LibraryWebGPU[name];
++  LibraryWebGPU[getter + '__sig'] = 'dp';
++  LibraryWebGPU[getter + '__proxy'] = 'sync';
++  LibraryWebGPU[name] = new Function('ptr', 'return _' + getter + '(ptr)');
++  LibraryWebGPU[name + '__deps'] = [getter];
++  delete LibraryWebGPU[name + '__proxy'];
++}
++#endif
++
+ // Add and set __i53abi to true for functions with 64-bit value in their
+ // signatures, if not explicitly set otherwise.
+ for (const key of Object.keys(LibraryWebGPU)) {
