@@ -963,7 +963,7 @@ Vector<String> OS::_read_pe_debug_id(const Ref<FileAccess> &p_f) const {
 		uint32_t rec_size = p_f->get_32();
 		p_f->get_32();
 		uint32_t rec_offset = p_f->get_32();
-		if (rec_type == 0x00000002) {
+		if (rec_type == 0x00000002 && rec_size >= 4 && uint64_t(rec_offset) + rec_size <= p_f->get_length()) {
 			// TYPE_CODEVIEW
 			p_f->seek(rec_offset);
 			uint32_t cv_signature = p_f->get_32();
@@ -974,8 +974,8 @@ Vector<String> OS::_read_pe_debug_id(const Ref<FileAccess> &p_f) const {
 			} else {
 				continue;
 			}
-			if (cv_size == 21) {
-				// UUID + 1
+			if (cv_size >= 20) {
+				// The GUID and age identify the build independently of the trailing PDB path.
 				uint32_t uuid_1 = p_f->get_32();
 				uint16_t uuid_2 = p_f->get_16();
 				uint16_t uuid_3 = p_f->get_16();
