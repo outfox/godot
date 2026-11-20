@@ -61,7 +61,7 @@ TEST_CASE("[FontFile] BMFont page and kerning indices") {
 	file = FileAccess::open(path, FileAccess::WRITE);
 	REQUIRE(file.is_valid());
 	file->store_string("info size=16 unicode=1\nkerning first=-1 second=66 amount=2\n"
-					   "kerning first=65 second=-1 amount=2\nkerning first=4294967361 second=66 amount=4\n"
+					   "kerning first=65 second=-1 amount=2\nkerning first=4294967363 second=66 amount=4\n"
 					   "kerning first=65 second=1114112 amount=3\nkerning first=65 second=66 amount=2\n");
 	file->close();
 	ERR_PRINT_OFF
