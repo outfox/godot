@@ -334,7 +334,9 @@ static bool WINDOWS_JoystickInit(void)
     WIN_InitDeviceNotification();
 
     SDL_XINPUT_JoystickInit();
-    SDL_DINPUT_JoystickInit();
+    if (!SDL_DINPUT_JoystickInit()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_INPUT, "DirectInput joystick initialization failed: %s", SDL_GetError());
+    }
 
 #if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
     s_bJoystickThread = SDL_GetHintBoolean(SDL_HINT_JOYSTICK_THREAD, true);
