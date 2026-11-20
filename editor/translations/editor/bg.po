@@ -788,7 +788,7 @@ msgid "Independent"
 msgstr "Независим"
 
 msgid "Cyclic Mutable"
-msgstr "Циклично заглушаване"
+msgstr "Циклична променлива"
 
 msgid "Cyclic Constant"
 msgstr "Циклична константа"
