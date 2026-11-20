@@ -37,6 +37,7 @@
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/os/time.h"
+#include "editor/docks/inspector_dock.h"
 #include "editor/editor_node.h"
 #include "editor/editor_undo_redo_manager.h"
 #include "editor/inspector/editor_context_menu_plugin.h"
@@ -699,6 +700,9 @@ void EditorData::remove_scene(int p_idx) {
 		undo_redo_manager->discard_history(edited_scene[p_idx].history_id);
 	}
 	edited_scene.remove_at(p_idx);
+	if (InspectorDock::get_singleton()) {
+		InspectorDock::get_inspector_singleton()->cleanup_object();
+	}
 }
 
 void EditorData::set_scene_root(int p_idx, Node *p_root) {
