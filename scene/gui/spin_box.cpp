@@ -97,6 +97,10 @@ Size2 SpinBox::get_minimum_size() const {
 }
 
 void SpinBox::_update_text(bool p_only_update_if_value_changed) {
+	if (!line_edit->is_editing() && !format.is_empty() && !plural_format.is_empty() && plural_format.contains("%s") != use_default_format) {
+		line_edit->set_text_with_selection(RTR("<Invalid>"));
+		return;
+	}
 	if (!line_edit->is_editing() && !format.is_empty() && !use_default_format) {
 		const Variant current_value = get_value();
 		bool error = false;
@@ -125,9 +129,6 @@ void SpinBox::_update_text(bool p_only_update_if_value_changed) {
 			const Variant current_value = value;
 			bool error = false;
 			value = _get_xl_format().sprintf(Span(&current_value, 1), &error);
-			if (!error && !plural_format.is_empty() && (plural_format.contains("%s") != use_default_format)) {
-				error = true;
-			}
 			if (error) {
 				line_edit->set_text_with_selection(RTR("<Invalid>"));
 				return;
@@ -655,11 +656,12 @@ void SpinBox::set_plural_format(const String &p_format) {
 }
 
 void SpinBox::set_format_with_plural(const String &p_format, const String &p_plural) {
-	if (format == p_format && plural_format == p_format) {
+	if (format == p_format && plural_format == p_plural) {
 		return;
 	}
 	format = p_format;
 	plural_format = p_plural;
+	use_default_format = p_format.contains("%s");
 
 	_update_text();
 	update_configuration_warnings();

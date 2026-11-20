@@ -40,6 +40,28 @@ TEST_FORCE_LINK(test_button)
 
 namespace TestButton {
 
+TEST_CASE("[SceneTree][Button] Scaled touch hits are measured in viewport coordinates") {
+	Button *button = memnew(Button);
+	SceneTree::get_singleton()->get_root()->add_child(button);
+	const Vector2 viewport_size = button->get_viewport_rect().size;
+	button->set_size(viewport_size);
+	button->set_scale(Vector2(0.25, 0.25));
+	button->set_toggle_mode(true);
+	Ref<InputEventScreenTouch> touch;
+	touch.instantiate();
+	touch->set_position(viewport_size * 0.5);
+	touch->set_pressed(true);
+	static_cast<Control *>(button)->gui_input(touch);
+	Ref<InputEventScreenDrag> drag;
+	drag.instantiate();
+	drag->set_position(viewport_size * 0.75);
+	static_cast<Control *>(button)->gui_input(drag);
+	touch->set_pressed(false);
+	static_cast<Control *>(button)->gui_input(touch);
+	CHECK(button->is_pressed());
+	memdelete(button);
+}
+
 TEST_CASE("[SceneTree][Button] Long press activates only once") {
 	Button *button = memnew(Button);
 	SceneTree::get_singleton()->get_root()->add_child(button);
