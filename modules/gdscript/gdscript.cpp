@@ -2070,9 +2070,7 @@ GDScriptInstance::~GDScriptInstance() {
 		}
 	}
 
-	if (script.is_valid()) {
-		script->instances.remove(&script_instance_list);
-	}
+	script_instance_list.remove_from_list();
 }
 
 /************* SCRIPT LANGUAGE **************/
