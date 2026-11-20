@@ -215,7 +215,7 @@ String OS_Web::get_name() const {
 }
 
 void OS_Web::add_frame_delay(bool p_can_draw, bool p_wake_for_events) {
-#ifndef PROXY_TO_PTHREAD_ENABLED
+#ifdef PROXY_TO_PTHREAD_ENABLED
 	OS::add_frame_delay(p_can_draw, p_wake_for_events);
 #endif
 }
@@ -388,8 +388,27 @@ extern "C" EMSCRIPTEN_KEEPALIVE void godot_web_sync_side_modules() {
 // 2dog: threads that were blocked while a module loaded catch up when they wake, before running more code, like
 // emscripten's dlsync. Threaded 2dog hosts link with --wrap=emscripten_futex_wait.
 extern "C" int __real_emscripten_futex_wait(volatile void *p_addr, uint32_t p_val, double p_max_wait_ms);
+#ifdef WEBGPU_ENABLED
+extern "C" bool emwgpuIsDeviceWorker();
+extern "C" void emwgpuPollDeviceCalls();
+#endif
 extern "C" int __wrap_emscripten_futex_wait(volatile void *p_addr, uint32_t p_val, double p_max_wait_ms) {
-	const int ret = __real_emscripten_futex_wait(p_addr, p_val, p_max_wait_ms);
+	int ret;
+#ifdef WEBGPU_ENABLED
+	if (emwgpuIsDeviceWorker() && p_max_wait_ms != 0) {
+		// Shader workers can need the device while the renderer is waiting for their tasks to finish.
+		const double deadline = p_max_wait_ms < 0 ? INFINITY : emscripten_get_now() + p_max_wait_ms;
+		double remaining;
+		do {
+			emwgpuPollDeviceCalls();
+			remaining = MAX(0.0, deadline - emscripten_get_now());
+			ret = __real_emscripten_futex_wait(p_addr, p_val, MIN(remaining, 1.0));
+		} while (ret == -ETIMEDOUT && remaining > 1.0);
+	} else
+#endif
+	{
+		ret = __real_emscripten_futex_wait(p_addr, p_val, p_max_wait_ms);
+	}
 	godot_web_sync_side_modules();
 	return ret;
 }

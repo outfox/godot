@@ -82,8 +82,9 @@ const GodotIME = {
 			}
 			const canvas = GodotConfig.canvas;
 			const rect = canvas.getBoundingClientRect();
-			const rw = canvas.width / rect.width;
-			const rh = canvas.height / rect.height;
+			const size = Module['godotWebGPUSize'] || canvas;
+			const rw = size.width / rect.width;
+			const rh = size.height / rect.height;
 			const clx = (x / rw) + rect.x;
 			const cly = (y / rh) + rect.y;
 
@@ -458,8 +459,9 @@ const GodotInput = {
 
 		computePosition: function (evt, rect) {
 			const canvas = GodotConfig.canvas;
-			const rw = canvas.width / rect.width;
-			const rh = canvas.height / rect.height;
+			const size = Module['godotWebGPUSize'] || canvas;
+			const rw = size.width / rect.width;
+			const rh = size.height / rect.height;
 			const x = (evt.clientX - rect.x) * rw;
 			const y = (evt.clientY - rect.y) * rh;
 			return [x, y];
@@ -492,8 +494,9 @@ const GodotInput = {
 			const rect = canvas.getBoundingClientRect();
 			const pos = GodotInput.computePosition(evt, rect);
 			// Scale movement
-			const rw = canvas.width / rect.width;
-			const rh = canvas.height / rect.height;
+			const size = Module['godotWebGPUSize'] || canvas;
+			const rw = size.width / rect.width;
+			const rh = size.height / rect.height;
 			const rel_pos_x = evt.movementX * rw;
 			const rel_pos_y = evt.movementY * rh;
 			const modifiers = GodotInput.getModifiers(evt);

@@ -297,9 +297,7 @@ bool profile_gpu = false;
 static const String NULL_DISPLAY_DRIVER("headless");
 
 static const char *webgpu_unavailable_reason() {
-#if defined(WEB_ENABLED) && defined(THREADS_ENABLED)
-	return "WebGPU is unavailable in multithreaded browser runtimes. Use a single-threaded runtime or OpenGL Compatibility.";
-#elif defined(REAL_T_IS_DOUBLE)
+#if defined(REAL_T_IS_DOUBLE)
 	return "WebGPU is unavailable in double-precision runtimes. Use a single-precision runtime or another rendering driver.";
 #elif defined(ANDROID_ENABLED)
 	return "WebGPU is unavailable on Android. Use Vulkan or OpenGL Compatibility.";
@@ -3075,6 +3073,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 
 	GLOBAL_DEF_RST_NOVAL("audio/driver/driver", AudioDriverManager::get_driver(0)->get_name());
 	if (audio_driver.is_empty()) { // Specified in project.godot.
+#ifndef WEB_ENABLED
 		if (project_manager) {
 			// The project manager doesn't need to play sound (TTS audio output is not emitted by Godot, but by the system itself).
 			// Disable audio output so it doesn't appear in the list of applications outputting sound in the OS.
@@ -3083,6 +3082,9 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 		} else {
 			audio_driver = GLOBAL_GET("audio/driver/driver");
 		}
+#else
+		audio_driver = GLOBAL_GET("audio/driver/driver");
+#endif
 	}
 
 	// Make sure that dummy is the last one, which it is assumed to be by design.

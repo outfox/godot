@@ -6,8 +6,36 @@ import vm from 'node:vm';
 const configSource = readFileSync(new URL('../../../platform/web/js/engine/config.js', import.meta.url), 'utf8');
 const engineSource = readFileSync(new URL('../../../platform/web/js/engine/engine.js', import.meta.url), 'utf8');
 const featuresSource = readFileSync(new URL('../../../platform/web/js/engine/features.js', import.meta.url), 'utf8');
+const deviceSource = readFileSync(new URL('../../../platform/web/js/engine/webgpu_device.js', import.meta.url), 'utf8');
 
-function harness(gpu, unavailableReason = '', { webgl = true, defaultDriver = '' } = {}) {
+test('surface resize measures the selected canvas after transfer', () => {
+    const library = {};
+    const game = { width: 320, height: 240 };
+    const other = { width: 64, height: 48 };
+    const heap = [];
+    const context = {
+        LibraryManager: { library }, autoAddDeps() {}, mergeInto: Object.assign,
+        GodotConfig: { canvas: game }, Module: {},
+        GodotRuntime: { parseString: value => value, setHeapValue: (index, value) => { heap[index] = value; } },
+        findCanvasEventTarget: selector => ({ '#embedded-game': game, '#preview': other })[selector],
+    };
+    vm.runInNewContext(readFileSync(new URL('../../../platform/web/js/libs/library_godot_display.js', import.meta.url), 'utf8'), context);
+    const size = library.godot_js_display_canvas_size_get;
+    assert.equal(size('#embedded-game', 0, 1), 1);
+    assert.deepEqual(heap, [320, 240]);
+    context.Module.godotWebGPUSize = { width: 800, height: 600 };
+    context.Module.godotWebGPUCanvasSelector = '[data-godot-webgpu="test"]';
+    assert.equal(size(context.Module.godotWebGPUCanvasSelector, 0, 1), 1);
+    assert.deepEqual(heap, [800, 600]);
+    assert.equal(size('#embedded-game', 0, 1), 1);
+    assert.deepEqual(heap, [800, 600]);
+    assert.equal(size('#preview', 0, 1), 1);
+    assert.deepEqual(heap, [64, 48]);
+    assert.equal(size('#missing', 0, 1), 0);
+    assert.deepEqual(heap, [64, 48]);
+});
+
+function harness(gpu, unavailableReason = '', { webgl = true, defaultDriver = '', prepareWorker } = {}) {
     const modules = [];
     const calls = [];
     const warnings = [];
@@ -38,10 +66,39 @@ function harness(gpu, unavailableReason = '', { webgl = true, defaultDriver = ''
             });
         },
     });
+    context.Godot.prepareWorkerWebGPU = prepareWorker;
     vm.runInContext(configSource.replace("renderingDriver: '',", `renderingDriver: '${defaultDriver}',`)
-        + '\n' + featuresSource + '\n' + engineSource.replace('___GODOT_WEBGPU_UNAVAILABLE_REASON___', JSON.stringify(unavailableReason)), context);
+        + '\n' + featuresSource + '\n' + deviceSource + '\n'
+        + engineSource.replaceAll('___GODOT_THREADS_ENABLED', String(!!prepareWorker))
+            .replace('___GODOT_WEBGPU_UNAVAILABLE_REASON___', JSON.stringify(unavailableReason)), context);
     return { Engine: context.window.Engine, modules, calls, warnings, contexts, window: context.window };
 }
+
+test('the threaded shell starts WebGPU on the rendering worker', async () => {
+    let workerCanvas;
+    const { Engine, modules, calls } = harness(undefined, '', { prepareWorker: (_, canvas) => { workerCanvas = canvas; } });
+    await new Engine({ executable: 'godot', renderingDriver: 'webgpu' }).startGame();
+    assert.ok(workerCanvas);
+    assert.equal(modules[0].preinitializedWebGPUDevice, undefined);
+    assert.equal(calls.length, 1);
+});
+
+test('worker device failure falls back before canvas transfer and propagates after transfer', async () => {
+    for (const transferred of [false, true]) {
+        const { Engine, calls } = harness(undefined, '', { prepareWorker: module => {
+            if (transferred) module.godotWebGPUSize = { width: 128, height: 128 };
+            throw Error('Worker failed');
+        } });
+        const start = new Engine({ executable: 'godot', renderingDriver: 'webgpu' }).startGame();
+        if (transferred) {
+            await assert.rejects(start, /Worker failed/);
+            assert.equal(calls.length, 0);
+        } else {
+            await start;
+            assert.deepEqual(calls[0].slice(0, 4), ['--rendering-driver', 'opengl3', '--rendering-method', 'gl_compatibility']);
+        }
+    }
+});
 
 test('WebGPU preflight does not create or require a WebGL context', () => {
     const { Engine, contexts } = harness({}, '', { webgl: false });
@@ -204,7 +261,6 @@ test('the browser requests the same optional features and all limits as the nati
 });
 
 for (const reason of [
-    'WebGPU is unavailable in multithreaded browser runtimes.',
     'WebGPU is unavailable in double-precision runtimes.',
     'WebGPU is not included in this runtime.',
 ]) {

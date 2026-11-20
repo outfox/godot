@@ -10,6 +10,7 @@
  */
 const Engine = (function () {
 	const webgpuUnavailableReason = ___GODOT_WEBGPU_UNAVAILABLE_REASON___;
+	const workerWebGPU = ___GODOT_THREADS_ENABLED && typeof Godot['prepareWorkerWebGPU'] === 'function';
 	const preloader = new Preloader();
 
 	let loadPromise = null;
@@ -133,7 +134,7 @@ const Engine = (function () {
 					});
 				}
 				preloader.setProgressFunc(this.config.onProgress);
-				if (me.config.renderingDriver === 'webgpu' && !me.config.preinitializedWebGPUDevice) {
+				if (me.config.renderingDriver === 'webgpu' && !me.config.preinitializedWebGPUDevice && !workerWebGPU) {
 					initPromise = Engine.requestWebGPUDevice().then(function (device) {
 						me.config.preinitializedWebGPUDevice = device;
 						return doInit(loadPromise);
@@ -186,9 +187,24 @@ const Engine = (function () {
 			start: function (override) {
 				this.config.update(override);
 				const me = this;
-				return me.init().then(function () {
+				return me.init().then(async function () {
 					if (!me.rtenv) {
 						return Promise.reject(new Error('The engine must be initialized before it can be started'));
+					}
+					const config = me.config.getGodotConfig(function () {
+						me.rtenv = null;
+					});
+					if (workerWebGPU && me.config.renderingDriver === 'webgpu' && !me.config.preinitializedWebGPUDevice) {
+						try {
+							await Godot['prepareWorkerWebGPU'](me.rtenv, config['canvas']);
+						} catch (err) {
+							if (me.rtenv['godotWebGPUSize']) {
+								throw err;
+							}
+							console.warn('WebGPU device unavailable; falling back to WebGL 2 Compatibility.', err);
+							me.config.renderingDriver = 'opengl3';
+							webgpuFallback = true;
+						}
 					}
 					if (webgpuFallback) {
 						// Apply after start overrides too (e.g. the separate init/preload/start path).
@@ -206,15 +222,6 @@ const Engine = (function () {
 							}
 						}
 						me.config.args = ['--rendering-driver', 'opengl3', '--rendering-method', 'gl_compatibility'].concat(fallbackArgs);
-					}
-
-					let config = {};
-					try {
-						config = me.config.getGodotConfig(function () {
-							me.rtenv = null;
-						});
-					} catch (e) {
-						return Promise.reject(e);
 					}
 					// Godot configuration.
 					me.rtenv['initConfig'](config);
@@ -387,67 +394,7 @@ const Engine = (function () {
 		if (webgpuUnavailableReason) {
 			return Promise.reject(new Error(webgpuUnavailableReason));
 		}
-		if (typeof navigator === 'undefined' || !navigator.gpu) {
-			return Promise.reject(new Error(
-				'WebGPU is not supported in this browser.\n'
-				+ 'Try using a recent version of Chrome, Edge, or Firefox.'
-			));
-		}
-		return navigator.gpu.requestAdapter(adapterOptions || {
-			powerPreference: 'high-performance',
-		}).then(function (adapter) {
-			if (!adapter) {
-				return Promise.reject(new Error(
-					'WebGPU adapter not found. Your GPU may not support WebGPU.'
-				));
-			}
-			const desc = deviceDescriptor || {
-				requiredFeatures: [],
-			};
-			// Keep in sync with the native list in rendering_context_driver_webgpu_native.cpp.
-			// Without the compression features, compressed textures are decompressed to RGBA8 on the CPU.
-			const optionalFeatures = [
-				'depth32float-stencil8',
-				'float32-filterable',
-				'float32-blendable',
-				'texture-formats-tier1',
-				'texture-formats-tier2',
-				'rg11b10ufloat-renderable',
-				'clip-distances',
-				'dual-source-blending',
-				'indirect-first-instance',
-				'texture-compression-bc',
-				'texture-compression-etc2',
-				'texture-compression-astc',
-			];
-			desc.requiredFeatures = (desc.requiredFeatures || []).concat(optionalFeatures.filter((feature) => adapter.features.has(feature)));
-			// Like the native backend, request every limit the adapter supports.
-			desc.requiredLimits ||= {};
-			for (const key in adapter.limits) {
-				if (adapter.limits[key] !== undefined) {
-					desc.requiredLimits[key] = adapter.limits[key];
-				}
-			}
-			return adapter.requestDevice(desc).then(function (device) {
-				device['godotAdapterInfo'] = adapter.info || {};
-				// Monitor device loss (non-blocking — just log).
-				device.lost.then(function (info) {
-					const reason = info.reason || 'unknown';
-					const msg = info.message || '';
-					console.error(`[Godot] WebGPU device lost (reason: ${reason}): ${msg}`); // eslint-disable-line no-console
-				});
-				device.addEventListener('uncapturederror', function (event) {
-					// Include the full error message — `event.error` alone only
-					// serializes to the constructor name ("GPUValidationError"),
-					// hiding the detail. `.message` contains the Dawn error text.
-					const err = event.error;
-					const kind = (err && err.constructor && err.constructor.name) || 'UnknownError';
-					const msg = (err && err.message) ? err.message : String(err);
-					console.error(`[Godot] WebGPU uncaptured error: ${kind}: ${msg}`); // eslint-disable-line no-console
-				});
-				return device;
-			});
-		});
+		return godotRequestWebGPUDevice(adapterOptions, deviceDescriptor);
 	};
 
 	// Closure compiler exported static methods.

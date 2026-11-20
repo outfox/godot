@@ -191,6 +191,9 @@ Error ResourceImporterDynamicFont::import(ResourceUID::ID p_source_id, const Str
 	font->set_oversampling(oversampling);
 	font->set_fallbacks(fallbacks);
 
+	RID frid = font->_get_rid();
+	ERR_FAIL_COND_V_MSG(!TS->font_validate(frid), FAILED, vformat("Cannot load font data from \"%s\".", p_source_file));
+
 	if (subpixel_positioning == 4 || hinting == 3 || hinting == 4) /* Dected Pixel Fonts */ {
 		Array rids = font->get_rids();
 		if (!rids.is_empty()) {

@@ -32,6 +32,7 @@
 
 #ifdef WEBGPU_ENABLED
 
+#include "core/templates/safe_refcount.h"
 #include "servers/rendering/rendering_device_driver.h"
 
 #include <webgpu/webgpu.h>
@@ -316,6 +317,9 @@ struct WGSwapChain {
 	uint32_t width = 0, height = 0;
 	WGRenderPass *render_pass = nullptr;
 	uint64_t surface_id = 0; // Context driver SurfaceID — used to look up size on resize.
+#if defined(WEB_ENABLED) && defined(THREADS_ENABLED)
+	WGPUTexture back_buffer = nullptr;
+#endif
 	WGPUTexture current_texture = nullptr; // Released after each frame.
 	WGPUTextureView current_view = nullptr;
 	WGFramebuffer *current_framebuffer = nullptr;
@@ -469,8 +473,7 @@ struct WGCommandBuffer {
 // =============================================================================
 
 struct WGFence {
-	uint32_t pending_callbacks = 0; // wgpuQueueOnSubmittedWorkDone callbacks in flight (a fence can be resubmitted).
-	bool freed = false; // Freed while callbacks pending; the last callback deletes it.
+	SafeNumeric<uint32_t> references{ 1 }; // One owner plus one reference per submitted callback.
 	WGPUFuture future = {}; // Most recent submission.
 };
 

@@ -97,6 +97,23 @@ TEST_CASE("[SceneTree][SpinBox] Prefix and suffix in line edit text") {
 	memdelete(spin);
 }
 
+TEST_CASE("[SceneTree][SpinBox] Singular and plural formats agree on the value type") {
+	SpinBox *spin = memnew(SpinBox);
+	SceneTree::get_singleton()->get_root()->add_child(spin);
+	spin->set_value(2);
+	spin->set_format_with_plural("%s item", "%s items");
+	CHECK(spin->get_line_edit()->get_text().contains("2"));
+	CHECK_FALSE(spin->get_line_edit()->get_text().contains("<Invalid>"));
+	spin->set_format_with_plural("%d item", "%s items");
+	CHECK(spin->get_line_edit()->get_text() == "<Invalid>");
+	spin->set_format_with_plural("%s item", "%d items");
+	CHECK(spin->get_line_edit()->get_text() == "<Invalid>");
+	spin->set_format_with_plural("%s item", "%s item");
+	spin->set_format_with_plural("%s item", "%s things");
+	CHECK(spin->get_plural_format() == "%s things");
+	memdelete(spin);
+}
+
 TEST_CASE("[SceneTree][SpinBox] Delegation to inner line edit") {
 	SpinBox *spin = memnew(SpinBox);
 

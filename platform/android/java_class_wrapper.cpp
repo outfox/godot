@@ -585,16 +585,23 @@ bool JavaClass::_set_field_value(JNIEnv *p_env, jobject p_instance, jclass p_cla
 }
 
 bool JavaClass::_get_field(jobject p_instance, const StringName &p_name, Variant &r_ret) const {
-	if (fields.has(p_name)) {
-		const JavaClass::FieldInfo field_info = fields[p_name];
-		if (field_info._static && field_info._final) {
-			r_ret = field_info.constant_value;
-			return true;
-		}
-
+	const FieldInfo *field_info = fields.getptr(p_name);
+	if (field_info) {
 		JNIEnv *env = get_jni_env();
 		ERR_FAIL_NULL_V(env, false);
-		return _get_field_value(env, p_instance, _class, field_info, r_ret);
+		// Java arrays can change and an object wrapper may hold this JavaClass alive.
+		if (field_info->_static && field_info->_final && (field_info->field_type & ~ARG_NUMBER_CLASS_BIT) <= ARG_TYPE_STRING) {
+			MutexLock lock(constant_values_mutex);
+			if (!field_info->_constant_value_initialized) {
+				if (!_get_field_value(env, p_instance, _class, *field_info, field_info->constant_value)) {
+					return false;
+				}
+				field_info->_constant_value_initialized = true;
+			}
+			r_ret = field_info->constant_value;
+			return true;
+		}
+		return _get_field_value(env, p_instance, _class, *field_info, r_ret);
 	}
 
 	// Check the parent class.
@@ -607,12 +614,10 @@ bool JavaClass::_get_field(jobject p_instance, const StringName &p_name, Variant
 }
 
 bool JavaClass::_set_field(jobject p_instance, const StringName &p_name, const Variant &p_property) {
-	if (fields.has(p_name)) {
-		const JavaClass::FieldInfo field_info = fields[p_name];
-
+	if (const FieldInfo *field_info = fields.getptr(p_name)) {
 		JNIEnv *env = get_jni_env();
 		ERR_FAIL_NULL_V(env, false);
-		return _set_field_value(env, p_instance, _class, field_info, p_property);
+		return _set_field_value(env, p_instance, _class, *field_info, p_property);
 	}
 
 	// Check the parent class.
@@ -1906,23 +1911,10 @@ bool JavaClassWrapper::_wrap_class_components(JNIEnv *p_env, const Ref<JavaClass
 				field_info._final = mods & 0x10;
 				field_info.field_type = sig;
 				field_info.field_sig = strsig;
-				if (field_info._static) {
-					field_info.field = p_env->GetStaticFieldID(
-							p_class,
-							str_field.utf8().get_data(),
-							strsig.utf8().get_data());
-					if (field_info._final) {
-						// The field value won't change, so we cache it.
-						if (!JavaClass::_get_field_value(p_env, nullptr, p_class, field_info, field_info.constant_value)) {
-							print_line("Unable to retrieve value for constant: " + p_java_class->java_class_name + "::" + str_field);
-						}
-					}
-				} else {
-					field_info.field = p_env->GetFieldID(
-							p_class,
-							str_field.utf8().get_data(),
-							strsig.utf8().get_data());
-				}
+				field_info.field = field_info._static
+						? p_env->GetStaticFieldID(p_class, str_field.utf8().get_data(), strsig.utf8().get_data())
+						: p_env->GetFieldID(p_class, str_field.utf8().get_data(), strsig.utf8().get_data());
+
 				if (p_env->ExceptionCheck()) {
 					// Exceptions may be thrown when trying to access hidden fields; write the exception to the logs and continue.
 					p_env->ExceptionDescribe();

@@ -303,12 +303,13 @@ const GodotDisplayScreen = {
 			const dWidth = GodotDisplayScreen.desired_size[0];
 			const dHeight = GodotDisplayScreen.desired_size[1];
 			const canvas = GodotConfig.canvas;
+			const size = Module['godotWebGPUSize'] || canvas;
 			let width = dWidth;
 			let height = dHeight;
 			if (noResize) {
 				// Don't resize canvas, just update GL if needed.
-				if (canvas.width !== width || canvas.height !== height) {
-					GodotDisplayScreen.desired_size = [canvas.width, canvas.height];
+				if (size.width !== width || size.height !== height) {
+					GodotDisplayScreen.desired_size = [size.width, size.height];
 					GodotDisplayScreen._updateGL();
 					return 1;
 				}
@@ -322,11 +323,11 @@ const GodotDisplayScreen = {
 			}
 			const csw = `${Math.floor(width / scale)}px`;
 			const csh = `${Math.floor(height / scale)}px`;
-			if (canvas.style.width !== csw || canvas.style.height !== csh || canvas.width !== width || canvas.height !== height) {
+			if (canvas.style.width !== csw || canvas.style.height !== csh || size.width !== width || size.height !== height) {
 				// Size doesn't match.
 				// Resize canvas, set correct CSS pixel size, update GL.
-				canvas.width = width;
-				canvas.height = height;
+				size.width = width;
+				size.height = height;
 				canvas.style.width = csw;
 				canvas.style.height = csh;
 				GodotDisplayScreen._updateGL();
@@ -517,8 +518,25 @@ const GodotDisplay = {
 	godot_js_display_window_size_get__proxy: 'sync',
 	godot_js_display_window_size_get__sig: 'vii',
 	godot_js_display_window_size_get: function (p_width, p_height) {
-		GodotRuntime.setHeapValue(p_width, GodotConfig.canvas.width, 'i32');
-		GodotRuntime.setHeapValue(p_height, GodotConfig.canvas.height, 'i32');
+		const size = Module['godotWebGPUSize'] || GodotConfig.canvas;
+		GodotRuntime.setHeapValue(p_width, size.width, 'i32');
+		GodotRuntime.setHeapValue(p_height, size.height, 'i32');
+	},
+
+	godot_js_display_canvas_size_get__proxy: 'sync',
+	godot_js_display_canvas_size_get__deps: ['$findCanvasEventTarget'],
+	godot_js_display_canvas_size_get__sig: 'iiii',
+	godot_js_display_canvas_size_get: function (p_selector, p_width, p_height) {
+		const transferred = Module['godotWebGPUCanvasSelector'];
+		const canvas = transferred && GodotRuntime.parseString(p_selector) === transferred
+			? GodotConfig.canvas : findCanvasEventTarget(p_selector);
+		if (!canvas) {
+			return 0;
+		}
+		const size = (canvas === GodotConfig.canvas && Module['godotWebGPUSize']) || canvas;
+		GodotRuntime.setHeapValue(p_width, size.width, 'i32');
+		GodotRuntime.setHeapValue(p_height, size.height, 'i32');
+		return 1;
 	},
 
 	godot_js_display_has_webgl__proxy: 'sync',

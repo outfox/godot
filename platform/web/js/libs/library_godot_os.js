@@ -107,7 +107,8 @@ const GodotConfig = {
 	godot_js_config_canvas_id_get__proxy: 'sync',
 	godot_js_config_canvas_id_get__sig: 'vii',
 	godot_js_config_canvas_id_get: function (p_ptr, p_ptr_max) {
-		GodotRuntime.stringToHeap(`#${GodotConfig.canvas.id}`, p_ptr, p_ptr_max);
+		const selector = Module['godotWebGPUCanvasSelector'] || `#${GodotConfig.canvas.id}`;
+		GodotRuntime.stringToHeap(selector, p_ptr, p_ptr_max);
 	},
 
 	godot_js_config_locale_get__proxy: 'sync',

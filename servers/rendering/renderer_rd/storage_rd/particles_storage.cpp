@@ -1365,20 +1365,20 @@ void ParticlesStorage::_particles_update_buffers(Particles *particles) {
 	bool uses_motion_vectors = RSG::viewport->get_num_viewports_with_motion_vectors() > 0 || (RendererCompositorStorage::get_singleton()->get_num_compositor_effects_with_motion_vectors() > 0);
 	bool index_draw_order = particles->draw_order == RSE::ParticlesDrawOrder::PARTICLES_DRAW_ORDER_INDEX;
 	bool enable_motion_vectors = uses_motion_vectors && index_draw_order && !particles->instance_motion_vectors_enabled;
-	bool only_instances_changed = false;
 
-	if (userdata_count != particles->userdata_count) {
-		// Mismatch userdata, re-create all buffers.
-		_particles_free_data(particles);
-	} else if (enable_motion_vectors) {
-		// Only motion vectors are required, release the transforms buffer and uniform set.
+	if (userdata_count != particles->userdata_count && particles->particle_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(particles->particle_buffer);
+		particles->particle_buffer = RID();
+	}
+
+	if (enable_motion_vectors) {
+		// Motion vectors need a second set of transforms even when userdata also changes.
 		if (particles->particle_instance_buffer.is_valid()) {
 			RD::get_singleton()->free_rid(particles->particle_instance_buffer);
 			particles->particle_instance_buffer = RID();
 		}
 
 		particles->particles_transforms_buffer_uniform_set = RID();
-		only_instances_changed = true;
 	} else if (!particles->particle_buffer.is_null()) {
 		// No operation is required because a buffer already exists, return early.
 		return;
@@ -1397,16 +1397,18 @@ void ParticlesStorage::_particles_update_buffers(Particles *particles) {
 			particles->restart_request = true;
 		}
 
-		PackedByteArray data;
-		uint32_t particle_instance_buffer_size = total_amount * (xform_size + 1 + 1) * sizeof(float) * 4;
-		if (uses_motion_vectors) {
-			particle_instance_buffer_size *= 2;
-			particles->instance_motion_vectors_enabled = true;
+		if (particles->particle_instance_buffer.is_null()) {
+			PackedByteArray data;
+			uint32_t particle_instance_buffer_size = total_amount * (xform_size + 1 + 1) * sizeof(float) * 4;
+			if (uses_motion_vectors) {
+				particle_instance_buffer_size *= 2;
+				particles->instance_motion_vectors_enabled = true;
+			}
+
+			data.resize_initialized(particle_instance_buffer_size);
+
+			particles->particle_instance_buffer = RD::get_singleton()->storage_buffer_create(particle_instance_buffer_size, data);
 		}
-
-		data.resize_initialized(particle_instance_buffer_size);
-
-		particles->particle_instance_buffer = RD::get_singleton()->storage_buffer_create(particle_instance_buffer_size, data);
 
 		{
 			Vector<RD::Uniform> uniforms;
@@ -1433,8 +1435,7 @@ void ParticlesStorage::_particles_update_buffers(Particles *particles) {
 		particles->instance_motion_vectors_previous_offset = 0;
 		particles->instance_motion_vectors_last_change = -1;
 
-		if (only_instances_changed) {
-			// Notify the renderer the instances uniform must be retrieved again, as it's the only element that has been changed because motion vectors were enabled.
+		if (enable_motion_vectors) {
 			particles->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_PARTICLES_INSTANCES);
 		}
 	}

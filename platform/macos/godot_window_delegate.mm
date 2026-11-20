@@ -106,12 +106,7 @@
 }
 
 - (void)windowDidFailToEnterFullScreen:(NSWindow *)window {
-	if (!ds || !ds->has_window(window_id)) {
-		return;
-	}
-
-	DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
-	wd.fs_transition = false;
+	[self restoreWindowedState];
 }
 
 - (void)windowDidEnterFullScreen:(NSNotification *)notification {
@@ -170,18 +165,20 @@
 }
 
 - (void)windowDidExitFullScreen:(NSNotification *)notification {
+	[self restoreWindowedState];
+	[self windowDidResize:notification];
+}
+
+- (void)restoreWindowedState {
 	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
 	DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
-	if (wd.exclusive_fullscreen) {
-		ds->update_presentation_mode();
-	}
-
 	wd.fullscreen = false;
 	wd.exclusive_fullscreen = false;
 	wd.fs_transition = false;
+	ds->update_presentation_mode();
 
 	// Set window size limits.
 	const float scale = ds->screen_get_max_scale();
@@ -199,7 +196,7 @@
 		[wd.window_object setStyleMask:NSWindowStyleMaskBorderless];
 		[wd.window_object setHasShadow:NO];
 	} else {
-		[wd.window_object setStyleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | (wd.extend_to_title ? NSWindowStyleMaskFullSizeContentView : 0) | (wd.resize_disabled ? 0 : NSWindowStyleMaskResizable)];
+		[wd.window_object setStyleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | (wd.extend_to_title ? NSWindowStyleMaskFullSizeContentView : 0) | (wd.resize_disabled || ds->get_confinement_window() == window_id ? 0 : NSWindowStyleMaskResizable)];
 		[wd.window_object setHasShadow:YES];
 	}
 	if (wd.layered_window) {
@@ -210,9 +207,6 @@
 	if (ds->is_always_on_top_recursive(window_id)) {
 		[wd.window_object setLevel:NSFloatingWindowLevel];
 	}
-
-	// Force window resize event and redraw.
-	[self windowDidResize:notification];
 }
 
 - (BOOL)windowShouldZoom:(NSWindow *)window toFrame:(NSRect)newFrame {
@@ -334,6 +328,10 @@
 		ds->update_mouse_pos(wd, [wd.window_object mouseLocationOutsideOfEventStream]);
 	}
 
+	if (ds->mouse_get_mode() == DisplayServerEnums::MOUSE_MODE_CONFINED || ds->mouse_get_mode() == DisplayServerEnums::MOUSE_MODE_CONFINED_HIDDEN) {
+		ds->set_confinement_window(window_id);
+	}
+
 	[self windowDidResize:notification]; // Emit resize event, to ensure content is resized if the window was resized while it was hidden.
 
 	wd.focused = true;
@@ -352,6 +350,12 @@
 
 	if (wd.window_button_view) {
 		[wd.window_button_view displayButtons];
+	}
+
+	if (ds->mouse_get_mode() == DisplayServerEnums::MOUSE_MODE_CONFINED || ds->mouse_get_mode() == DisplayServerEnums::MOUSE_MODE_CONFINED_HIDDEN) {
+		if (ds->get_confinement_window() == window_id) {
+			ds->set_confinement_window(DisplayServerEnums::INVALID_WINDOW_ID);
+		}
 	}
 
 	wd.focused = false;

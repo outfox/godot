@@ -44,6 +44,7 @@
 
 #include <webgpu/webgpu.h>
 #ifdef WEB_ENABLED
+#include "webgpu_device_thread.h"
 #include <emscripten/emscripten.h>
 #endif
 #include <cstdio>
@@ -63,10 +64,10 @@
 #define WEBGPU_DIAG_INT(...) 0
 #endif
 
-#ifdef WEB_ENABLED
+#if defined(WEB_ENABLED) && !defined(THREADS_ENABLED)
 static constexpr WGPUCallbackMode WEBGPU_CALLBACK_MODE = WGPUCallbackMode_AllowSpontaneous;
 #else
-// Deliver native completion callbacks while polling on the engine owner thread.
+// Deliver completions on the rendering thread that owns their userdata.
 static constexpr WGPUCallbackMode WEBGPU_CALLBACK_MODE = WGPUCallbackMode_AllowProcessEvents;
 #endif
 
@@ -81,8 +82,7 @@ static void _fence_work_done_body(void *p_userdata1) {
 	if (!fence) {
 		return;
 	}
-	fence->pending_callbacks--;
-	if (fence->freed && fence->pending_callbacks == 0) {
+	if (fence->references.decrement() == 0) {
 		memdelete(fence);
 	}
 }
@@ -303,6 +303,13 @@ RenderingDeviceDriverWebGPU::~RenderingDeviceDriverWebGPU() {
 // =============================================================================
 
 Error RenderingDeviceDriverWebGPU::initialize(uint32_t p_device_index, uint32_t p_frame_count) {
+#if defined(WEB_ENABLED) && defined(THREADS_ENABLED)
+	if (pthread_self() != emwgpuGetDeviceThread()) {
+		Error result = ERR_CANT_CREATE;
+		webgpu_on_device_thread([&] { result = initialize(p_device_index, p_frame_count); });
+		return result;
+	}
+#endif
 	// Initialize Tint shader compiler (SPIR-V → WGSL).
 	tint_wrapper_initialize();
 
@@ -489,7 +496,7 @@ Error RenderingDeviceDriverWebGPU::initialize(uint32_t p_device_index, uint32_t 
 	// Always-on: uncaptured error listener so WebGPU validation errors appear
 	// in the browser console before any abort(). Lightweight — no extra API calls.
 #ifdef WEB_ENABLED
-	MAIN_THREAD_EM_ASM({
+	EM_ASM({
 		var d = Module['preinitializedWebGPUDevice'];
 		if (d && !d._uncapturedPatched) {
 			d.addEventListener(
@@ -516,7 +523,7 @@ Error RenderingDeviceDriverWebGPU::initialize(uint32_t p_device_index, uint32_t 
 	// forces a sync compile path. On shiny_gen with ~383 shaders, leaving these on
 	// adds ~12s to startup. Re-enable by uncommenting #define WEBGPU_VERBOSE above.
 #if defined(WEBGPU_VERBOSE) && defined(WEB_ENABLED)
-	MAIN_THREAD_EM_ASM({
+	EM_ASM({
 		var d = Module['preinitializedWebGPUDevice'];
 		if (!d) {
 			console.error('[DIAG-PATCH] preinitializedWebGPUDevice missing');
@@ -2507,7 +2514,7 @@ Error RenderingDeviceDriverWebGPU::fence_wait(FenceID p_fence) {
 	WGFence *fence = (WGFence *)(p_fence.id);
 	ERR_FAIL_NULL_V(fence, ERR_INVALID_PARAMETER);
 #ifndef WEB_ENABLED
-	if (fence->pending_callbacks > 0) {
+	if (fence->references.get() > 1) {
 		WGPUFutureWaitInfo wait = { fence->future, false };
 		ERR_FAIL_COND_V_MSG(wgpuInstanceWaitAny(context_driver->get_instance(), 1, &wait, 30000000000ULL) != WGPUWaitStatus_Success, ERR_TIMEOUT, "WebGPU: GPU fence timed out.");
 	}
@@ -2530,18 +2537,14 @@ void RenderingDeviceDriverWebGPU::fence_free(FenceID p_fence) {
 		return;
 	}
 #ifndef WEB_ENABLED
-	if (fence->pending_callbacks > 0) {
+	if (fence->references.get() > 1) {
 		fence_wait(p_fence);
 	}
 #endif
 
-	// The callbacks still in flight hold the pointer; the last one deletes the fence.
-	if (fence->pending_callbacks > 0) {
-		fence->freed = true;
-		return;
+	if (fence->references.decrement() == 0) {
+		memdelete(fence);
 	}
-
-	memdelete(fence);
 }
 
 // =============================================================================
@@ -2608,13 +2611,12 @@ Error RenderingDeviceDriverWebGPU::command_queue_execute_and_present(CommandQueu
 		if (fence) {
 #ifndef WEB_ENABLED
 			// WaitAnyOnly callbacks only fire when waited on, so finish the previous one first.
-			if (fence->pending_callbacks > 0) {
+			if (fence->references.get() > 1) {
 				fence_wait(p_cmd_fence);
 			}
 #endif
-			fence->pending_callbacks++;
+			fence->references.increment();
 			WGPUQueueWorkDoneCallbackInfo cb = {};
-			cb.mode = WEBGPU_CALLBACK_MODE;
 			// Overload set (see definitions near the top of this file): the
 			// port's WGPUQueueWorkDoneCallback typedef selects the matching
 			// signature. A "no matching conversion" error here means a new
@@ -2622,7 +2624,9 @@ Error RenderingDeviceDriverWebGPU::command_queue_execute_and_present(CommandQueu
 			cb.callback = _fence_work_done_callback;
 			cb.userdata1 = fence;
 			cb.userdata2 = nullptr;
-#ifndef WEB_ENABLED
+#ifdef WEB_ENABLED
+			cb.mode = WGPUCallbackMode_AllowSpontaneous;
+#else
 			cb.mode = WGPUCallbackMode_WaitAnyOnly;
 #endif
 			fence->future = wgpuQueueOnSubmittedWorkDone(queue, cb);
@@ -2635,6 +2639,21 @@ Error RenderingDeviceDriverWebGPU::command_queue_execute_and_present(CommandQueu
 		if (sc && sc->surface) {
 #ifndef __EMSCRIPTEN__
 			wgpuSurfacePresent(sc->surface);
+#elif defined(THREADS_ENABLED)
+			if (sc->back_buffer && sc->current_texture) {
+				// Canvas textures expire between browser tasks. Acquire, copy and submit in one task.
+				webgpu_on_device_thread([&] {
+					EM_ASM({
+						const device = Module['preinitializedWebGPUDevice'];
+						const source = WebGPU.getJsObject($0);
+						const target = WebGPU.getJsObject($1).getCurrentTexture();
+						const encoder = device.createCommandEncoder();
+						encoder.copyTextureToTexture({ 'texture': source }, { 'texture': target },
+								[Math.min(source.width, target.width), Math.min(source.height, target.height)]);
+						device.queue.submit([encoder.finish()]);
+					}, sc->current_texture, sc->surface);
+				});
+			}
 #endif
 			// Post-submit diagnostic clear DISABLED — only pre-submit CYAN is active.
 			// This lets us see if Godot's submit overwrites the cyan.
@@ -2800,6 +2819,23 @@ Error RenderingDeviceDriverWebGPU::swap_chain_resize(CommandQueueID p_cmd_queue,
 	config.device = device;
 	config.format = sc->format;
 	config.usage = WGPUTextureUsage_RenderAttachment;
+#if defined(WEB_ENABLED) && defined(THREADS_ENABLED)
+	if (pthread_self() != emwgpuGetDeviceThread() || emwgpuGetDeviceThread() == emscripten_main_runtime_thread_id()) {
+		config.usage |= WGPUTextureUsage_CopyDst;
+		if (sc->back_buffer) {
+			wgpuTextureRelease(sc->back_buffer);
+		}
+		WGPUTextureDescriptor back_buffer = {};
+		back_buffer.dimension = WGPUTextureDimension_2D;
+		back_buffer.size = { width, height, 1 };
+		back_buffer.format = sc->format;
+		back_buffer.mipLevelCount = 1;
+		back_buffer.sampleCount = 1;
+		back_buffer.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_CopySrc;
+		sc->back_buffer = wgpuDeviceCreateTexture(device, &back_buffer);
+		ERR_FAIL_NULL_V(sc->back_buffer, ERR_CANT_CREATE);
+	}
+#endif
 	config.alphaMode = context_driver->surface_get_alpha_mode(sc->surface_id);
 	config.presentMode = context_driver->surface_get_present_mode(sc->surface_id);
 	config.width = width;
@@ -2843,49 +2879,57 @@ RDD::FramebufferID RenderingDeviceDriverWebGPU::swap_chain_acquire_framebuffer(C
 	}
 
 	// Acquire the next swap chain texture.
-	WGPUSurfaceTexture surface_texture = {};
-	wgpuSurfaceGetCurrentTexture(sc->surface, &surface_texture);
+#if defined(WEB_ENABLED) && defined(THREADS_ENABLED)
+	if (sc->back_buffer) {
+		sc->current_texture = sc->back_buffer;
+		wgpuTextureAddRef(sc->current_texture);
+	} else
+#endif
+	{
+		WGPUSurfaceTexture surface_texture = {};
+		wgpuSurfaceGetCurrentTexture(sc->surface, &surface_texture);
 
-	// Diagnostic: log surface texture status for the first few frames.
-	static int _st_log = 0;
-	if (_st_log < 10) {
-		WEBGPU_DIAG({ console.log('[SURFACE] status=' + $0 + ' texture=' + ($1 ? 'valid' : 'NULL')); }, (int)surface_texture.status, (int)(surface_texture.texture != nullptr));
-		_st_log++;
-	}
+		// Diagnostic: log surface texture status for the first few frames.
+		static int _st_log = 0;
+		if (_st_log < 10) {
+			WEBGPU_DIAG({ console.log('[SURFACE] status=' + $0 + ' texture=' + ($1 ? 'valid' : 'NULL')); }, (int)surface_texture.status, (int)(surface_texture.texture != nullptr));
+			_st_log++;
+		}
 
-	if (surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_Lost) {
-		ERR_PRINT_ONCE("WebGPU: surface lost — device or surface is no longer usable.");
-		return FramebufferID();
-	}
+		if (surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_Lost) {
+			ERR_PRINT_ONCE("WebGPU: surface lost — device or surface is no longer usable.");
+			return FramebufferID();
+		}
 
-	if (surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal ||
-			surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_Outdated) {
-		WARN_PRINT_ONCE(vformat("WebGPU: wgpuSurfaceGetCurrentTexture: resize-needed status=%d", (int)surface_texture.status));
-		r_resize_required = true;
-		return FramebufferID();
-	}
-	if (surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal) {
-		WARN_PRINT_ONCE(vformat("WebGPU: wgpuSurfaceGetCurrentTexture: unexpected status=%d", (int)surface_texture.status));
-		return FramebufferID();
-	}
+		if (surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal ||
+				surface_texture.status == WGPUSurfaceGetCurrentTextureStatus_Outdated) {
+			WARN_PRINT_ONCE(vformat("WebGPU: wgpuSurfaceGetCurrentTexture: resize-needed status=%d", (int)surface_texture.status));
+			r_resize_required = true;
+			return FramebufferID();
+		}
+		if (surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal) {
+			WARN_PRINT_ONCE(vformat("WebGPU: wgpuSurfaceGetCurrentTexture: unexpected status=%d", (int)surface_texture.status));
+			return FramebufferID();
+		}
 
-	sc->current_texture = surface_texture.texture;
+		sc->current_texture = surface_texture.texture;
 
-	// Get actual surface texture dimensions. On web, wgpuSurfaceConfigure may be called
-	// with OS physical-pixel dimensions (e.g. 1152×648 on HiDPI), but the browser canvas
-	// may be CSS-sized (e.g. 756×417). wgpuTextureGetWidth gives the real GPU texture size.
-	uint32_t actual_w = wgpuTextureGetWidth(sc->current_texture);
-	uint32_t actual_h = wgpuTextureGetHeight(sc->current_texture);
-	if (actual_w != sc->width || actual_h != sc->height) {
-		WARN_PRINT_ONCE(vformat("WebGPU: surface texture (%d x %d) differs from configured (%d x %d) — using actual size",
-				actual_w, actual_h, sc->width, sc->height));
-		sc->width = actual_w;
-		sc->height = actual_h;
-		// Sync the context driver's stored surface dimensions so that screen_get_width/height
-		// (used by the blit dst_rect normalization) returns the actual canvas size, not the
-		// configured HiDPI physical-pixel size. Without this, the blit only covers a fraction
-		// of the swap chain surface.
-		context_driver->surface_set_size(sc->surface_id, actual_w, actual_h);
+		// Get actual surface texture dimensions. On web, wgpuSurfaceConfigure may be called
+		// with OS physical-pixel dimensions (e.g. 1152×648 on HiDPI), but the browser canvas
+		// may be CSS-sized (e.g. 756×417). wgpuTextureGetWidth gives the real GPU texture size.
+		uint32_t actual_w = wgpuTextureGetWidth(sc->current_texture);
+		uint32_t actual_h = wgpuTextureGetHeight(sc->current_texture);
+		if (actual_w != sc->width || actual_h != sc->height) {
+			WARN_PRINT_ONCE(vformat("WebGPU: surface texture (%d x %d) differs from configured (%d x %d) — using actual size",
+					actual_w, actual_h, sc->width, sc->height));
+			sc->width = actual_w;
+			sc->height = actual_h;
+			// Sync the context driver's stored surface dimensions so that screen_get_width/height
+			// (used by the blit dst_rect normalization) returns the actual canvas size, not the
+			// configured HiDPI physical-pixel size. Without this, the blit only covers a fraction
+			// of the swap chain surface.
+			context_driver->surface_set_size(sc->surface_id, actual_w, actual_h);
+		}
 	}
 
 	// Create a view for this frame's swap chain texture.
@@ -2929,6 +2973,11 @@ RDD::DataFormat RenderingDeviceDriverWebGPU::swap_chain_get_format(SwapChainID p
 void RenderingDeviceDriverWebGPU::swap_chain_free(SwapChainID p_swap_chain) {
 	WGSwapChain *sc = (WGSwapChain *)(p_swap_chain.id);
 	ERR_FAIL_NULL(sc);
+#if defined(WEB_ENABLED) && defined(THREADS_ENABLED)
+	if (sc->back_buffer) {
+		wgpuTextureRelease(sc->back_buffer);
+	}
+#endif
 	if (sc->current_framebuffer) {
 		memdelete(sc->current_framebuffer);
 	}
@@ -3605,7 +3654,7 @@ RDD::ShaderID RenderingDeviceDriverWebGPU::shader_create_from_container(const Re
 
 	shader->has_override_declarations = detected_override_declarations;
 	if (detected_override_declarations) {
-		print_verbose(vformat("WebGPU: shader '%s' has override declarations — will use pipeline constants for specialization.", shader->name));
+		print_verbose(vformat("WebGPU: shader '%s' has override declarations - will use pipeline constants for specialization.", shader->name));
 	}
 
 	if (!error_text.is_empty()) {
@@ -6169,7 +6218,7 @@ void RenderingDeviceDriverWebGPU::command_begin_render_pass(CommandBufferID p_cm
 					' label=' + viewLabel +
 					' loadOp=' + $1 + ' storeOp=' + $2);
 				// Check if the view's texture matches the canvas surface texture.
-				var canvas = document.querySelector('#canvas');
+				var canvas = Module['godotWebGPUCanvas'] || (typeof document !== 'undefined' && document.querySelector('#canvas'));
 				if (canvas) {
 					var ctx = canvas.getContext('webgpu');
 					if (ctx) {

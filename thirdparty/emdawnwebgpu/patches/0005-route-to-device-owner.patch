@@ -1,0 +1,130 @@
+--- a/thirdparty/emdawnwebgpu/webgpu/src/library_webgpu.js
++++ b/thirdparty/emdawnwebgpu/webgpu/src/library_webgpu.js
+@@ -1970,4 +1970,4 @@
+-  wgpuInstanceCreateSurface__deps: ['$findCanvasEventTarget', 'emwgpuCreateSurface'],
++  wgpuInstanceCreateSurface__deps: ['$findCanvasEventTarget', '$UTF8ToString', 'emwgpuCreateSurface'],
+   wgpuInstanceCreateSurface: (instancePtr, descriptor) => {
+     {{{ gpu.makeCheck('descriptor') }}}
+     var nextInChainPtr = {{{ makeGetValue('descriptor', C_STRUCTS.WGPUSurfaceDescriptor.nextInChain, '*') }}};
+@@ -1981,7 +1981,10 @@ var LibraryWebGPU = {
+     {{{ gpu.makeCheckDescriptor('sourceCanvasHTMLSelector') }}}
+     var selectorPtr = {{{ makeGetValue('sourceCanvasHTMLSelector', C_STRUCTS.WGPUEmscriptenSurfaceSourceCanvasHTMLSelector.selector, '*') }}};
+     {{{ gpu.makeCheck('selectorPtr') }}}
+-    var canvas = findCanvasEventTarget(selectorPtr);
++    var canvas = Module['godotWebGPUCanvas'];
++    if (!canvas || UTF8ToString(selectorPtr) !== Module['godotWebGPUCanvasSelector']) {
++      canvas = findCanvasEventTarget(selectorPtr);
++    }
+ #if OFFSCREENCANVAS_SUPPORT
+     if (canvas.offscreenCanvas) canvas = canvas.offscreenCanvas;
+ #endif
+@@ -2704,21 +2704,31 @@ var LibraryWebGPU = {
+ };
+ 
+ #if PTHREADS
+-// Keep the device, canvas and JS handle table on the browser main thread.
++// Keep the fast path local. Other pthreads marshal numeric WebGPU arguments to the owner.
++LibraryWebGPU.$WebGPU.ownerCalls = [];
++LibraryWebGPU.$WebGPU.proxyCall = (id, args) => {
++  var saved = stackSave();
++  try {
++    var values = stackAlloc(args.length * 8);
++    HEAPF64.set(args, values / 8);
++    return _emwgpuProxyToDevice(id, args.length, values);
++  } finally {
++    stackRestore(saved);
++  }
++};
++LibraryWebGPU.$WebGPU__deps.push('emwgpuProxyToDevice');
++let nextOwnerCall = 0;
+ for (const [name, fn] of Object.entries(LibraryWebGPU)) {
+-  if (typeof fn === 'function' && !name.startsWith('$')) {
+-    LibraryWebGPU[name + '__proxy'] = 'sync';
+-  }
+-}
+-// The 3.x pthread proxy returns a double. Convert the three i64 getters on the caller.
+-for (const name of ['wgpuBufferGetSize', 'wgpuBufferGetUsage', 'wgpuTextureGetUsage']) {
+-  const getter = name + 'Number';
+-  LibraryWebGPU[getter] = LibraryWebGPU[name];
+-  LibraryWebGPU[getter + '__sig'] = 'dp';
+-  LibraryWebGPU[getter + '__proxy'] = 'sync';
+-  LibraryWebGPU[name] = new Function('ptr', 'return _' + getter + '(ptr)');
+-  LibraryWebGPU[name + '__deps'] = [getter];
+-  delete LibraryWebGPU[name + '__proxy'];
++  if (typeof fn !== 'function' || name.startsWith('$') || name === 'emwgpuWaitAny') continue;
++  const local = 'deviceThread_' + name;
++  const id = nextOwnerCall++;
++  const args = Array.from({length: fn.length}, (_, i) => 'a' + i);
++  LibraryWebGPU['$' + local] = fn;
++  LibraryWebGPU[name + '__deps'] = [...(LibraryWebGPU[name + '__deps'] || []), '$' + local];
++  LibraryWebGPU[name + '__postset'] = 'WebGPU.ownerCalls[' + id + '] = ' + local + ';';
++  LibraryWebGPU[name] = new Function(...args,
++      'if (Module["preinitializedWebGPUDevice"]) return ' + local + '(' + args + ');' +
++      'return WebGPU.proxyCall(' + id + ', [' + args + ']);');
+ }
+ #endif
+ 
+--- a/thirdparty/emdawnwebgpu/webgpu/src/webgpu.cpp
++++ b/thirdparty/emdawnwebgpu/webgpu/src/webgpu.cpp
+@@ -10,6 +10,8 @@
+ #include <emscripten/emscripten.h>
+ #ifdef __wasm_atomics__
+ #include <pthread.h>
++#include <emscripten/proxying.h>
++#include <emscripten/threading.h>
+ #endif
+ #include <webgpu/webgpu.h>
+ 
+@@ -45,6 +47,52 @@
+ #define DCHECK_PRINTF(...)
+ #endif
+ 
++#ifdef __wasm_atomics__
++static std::atomic<pthread_t> deviceThread{};
++static thread_local bool deviceWorker = false;
++static thread_local bool polling = false;
++static em_proxying_queue* WorkerQueue() {
++  static auto* queue = em_proxying_queue_create();
++  return queue;
++}
++extern "C" bool emwgpuIsDeviceWorker() {
++  return deviceWorker && !polling;
++}
++extern "C" void emwgpuPollDeviceCalls() {
++  polling = true;
++  emscripten_proxy_execute_queue(WorkerQueue());
++  polling = false;
++}
++extern "C" pthread_t emwgpuGetDeviceThread() {
++  auto owner = deviceThread.load();
++  return owner ? owner : emscripten_main_runtime_thread_id();
++}
++extern "C" EMSCRIPTEN_KEEPALIVE void emwgpuSetDeviceThread() {
++  WorkerQueue();
++  deviceThread.store(pthread_self());
++  deviceWorker = true;
++}
++extern "C" void emwgpuOnDeviceThread(void (*run)(void*), void* data) {
++  auto owner = emwgpuGetDeviceThread();
++  if (pthread_equal(owner, pthread_self())) {
++    run(data);
++  } else {
++    auto* queue = deviceThread.load() ? WorkerQueue() : emscripten_proxy_get_system_queue();
++    if (!emscripten_proxy_sync(queue, owner, run, data)) std::abort();
++  }
++}
++extern "C" double emwgpuProxyToDevice(int id, int count, double* args) {
++  struct Call { int id, count; double* args; double result; } call{id, count, args, 0};
++  emwgpuOnDeviceThread([](void* data) {
++    auto& c = *static_cast<Call*>(data);
++    c.result = EM_ASM_DOUBLE({
++      return WebGPU.ownerCalls[$0](...HEAPF64.subarray($2 / 8, $2 / 8 + $1));
++    }, c.id, c.count, c.args);
++  }, &call);
++  return call.result;
++}
++#endif
++
+ using FutureID = uint64_t;
+ static constexpr FutureID kNullFutureId = 0;
+ using InstanceID = uint64_t;

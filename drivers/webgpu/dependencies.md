@@ -20,8 +20,11 @@ uv run --no-project python drivers/webgpu/dependencies.py --verify
 
 Preparation verifies each archive, extracts only the selected files, regenerates
 SPIRV-Tools' tables using its upstream Python generators, and applies the sorted
-patch stack with `git apply`. The legacy Emscripten JavaScript is derived from
-the original release. Selection rules exclude unused backends, tests and build
+patch stack with `git apply`. The [Emdawnwebgpu patches](../../thirdparty/emdawnwebgpu/patches/README.md)
+select the legacy stack names, proxy threaded calls, preserve callback affinity and handle lifetimes,
+and route WebGPU calls to the device owner. Both JavaScript variants include these fixes.
+Preparation derives the Emscripten 3.x variant from the patched modern library.
+Selection rules exclude unused backends, tests and build
 tools; locked file counts catch accidental changes to the imported subset.
 `sources.py` supplies the same compiler input selection to SCons and the Tint CLI.
 

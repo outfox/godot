@@ -257,15 +257,11 @@ Files extracted from upstream source (restored using `drivers/webgpu/dependencie
 - `webgpu/` and `webgpu_cpp/` folders, including their `LICENSE` files
 - `emdawnwebgpu.port.py`, `README.md`, `VERSION.txt`
 
-Preparation derives `webgpu/src/library_webgpu_legacy.js`, changing only the
-stackSave/stackRestore JS-library dependency names to their Emscripten 3.x
-spelling for the pinned 3.1.56 .NET toolchain. Modern SDKs use the unmodified
-upstream JavaScript library.
-
-Patches:
-
-- `0001-select-legacy-stack-dependencies.patch` — Select the legacy JavaScript
-  library on Emscripten 3.x.
+Preparation applies the [Emdawnwebgpu patch stack](emdawnwebgpu/patches/README.md)
+for legacy stack selection, pthread proxying, thread-affine callbacks, handle
+lifetimes and device-owner routing. Modern SDKs use the patched JavaScript.
+Preparation derives `webgpu/src/library_webgpu_legacy.js` from it by changing
+the stackSave/stackRestore dependency names for Emscripten 3.x.
 
 
 ## enet
@@ -1096,7 +1092,7 @@ proposed by these libraries and better integrate them with Godot.
 ## sdl
 
 - Upstream: https://github.com/libsdl-org/SDL
-- Version: 3.4.16 (fa2c02bb6e21974a89ea9824bc53c9932abe5f9c, 2026)
+- Version: 3.4.20 (f00dc919ca35b9756316e86c4777392de442f9b2, 2026)
 - License: Zlib
 - Vendored: hidapi 0.14.0, license BSD-3-Clause
 
@@ -1113,6 +1109,7 @@ Patches:
 - `0005-ios-link.patch` ([GH-123903](https://github.com/godotengine/godot/pull/123903))
 - `0006-ios-iostream-no-prefpath.patch` ([GH-123899](https://github.com/godotengine/godot/pull/123899))
 - `0007-fix-linux-getenv-unsafe.patch` ([GH-124017](https://github.com/godotengine/godot/pull/124017))
+- `0008-fix-gameinput-and-2c-paddles.patch` ([outfox/godot#15](https://github.com/outfox/godot/pull/15))
 
 
 ## smaa

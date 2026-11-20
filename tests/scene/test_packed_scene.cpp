@@ -37,6 +37,62 @@ TEST_FORCE_LINK(test_packed_scene)
 
 namespace TestPackedScene {
 
+#ifdef TOOLS_ENABLED
+TEST_CASE("[PackedScene] Inherited root properties share one resource copy per edit instance") {
+	Ref<PackedScene> base;
+	base.instantiate();
+	Node *root = memnew(Node);
+	REQUIRE(base->pack(root) == OK);
+	memdelete(root);
+
+	PackedScene derived;
+	Ref<SceneState> state = derived.get_state();
+	state->set_base_scene(state->add_value(base));
+	int node = state->add_node(-1, -1, SceneState::TYPE_INSTANTIATED, state->add_name("Root"), -1, -1, -1);
+	Ref<Resource> resource;
+	resource.instantiate();
+	int value = state->add_value(resource);
+	state->add_node_property(node, state->add_name("metadata/first"), value);
+	state->add_node_property(node, state->add_name("metadata/second"), value);
+
+	Node *first = derived.instantiate(PackedScene::GEN_EDIT_STATE_MAIN_INHERITED);
+	Node *second = derived.instantiate(PackedScene::GEN_EDIT_STATE_MAIN_INHERITED);
+	REQUIRE(first);
+	REQUIRE(second);
+	Ref<Resource> copy = first->get_meta("first");
+	REQUIRE(copy.is_valid());
+	CHECK(copy != resource);
+	CHECK(copy == Ref<Resource>(first->get_meta("second")));
+	CHECK(copy != Ref<Resource>(second->get_meta("first")));
+	CHECK(Ref<Resource>(second->get_meta("first")) == Ref<Resource>(second->get_meta("second")));
+	memdelete(first);
+	memdelete(second);
+}
+
+TEST_CASE("[PackedScene] Local resources are remapped for each inherited edit instance") {
+	Node *root = memnew(Node);
+	Ref<Resource> local;
+	local.instantiate();
+	local->set_local_to_scene(true);
+	root->set_meta("first", local);
+	root->set_meta("second", local);
+	PackedScene packed;
+	REQUIRE(packed.pack(root) == OK);
+	Node *first = packed.instantiate(PackedScene::GEN_EDIT_STATE_MAIN_INHERITED);
+	Node *second = packed.instantiate(PackedScene::GEN_EDIT_STATE_MAIN_INHERITED);
+	REQUIRE(first);
+	REQUIRE(second);
+	Ref<Resource> first_local = first->get_meta("first");
+	CHECK(first_local != local);
+	CHECK(first_local == Ref<Resource>(first->get_meta("second")));
+	CHECK(first_local != Ref<Resource>(second->get_meta("first")));
+	CHECK(first_local->get_local_scene() == first);
+	memdelete(second);
+	memdelete(first);
+	memdelete(root);
+}
+#endif
+
 TEST_CASE("[PackedScene] Pack Scene and Retrieve State") {
 	// Create a scene to pack.
 	Node *scene = memnew(Node);

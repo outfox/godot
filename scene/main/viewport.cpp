@@ -793,7 +793,7 @@ void Viewport::_process_picking() {
 	if (Object::cast_to<Window>(this) && Input::get_singleton()->get_mouse_mode() == Input::MouseMode::MOUSE_MODE_CAPTURED) {
 		return;
 	}
-	if (!gui.mouse_in_viewport || gui.subwindow_over) {
+	if (!gui_is_mouse_in_viewport()) {
 		// Clear picking events if the mouse has left the viewport or is over an embedded window.
 		// These are locations, that are expected to not trigger physics picking.
 		physics_picking_events.clear();
@@ -5901,7 +5901,7 @@ void Viewport::CameraOverride<T>::enable(Viewport *p_viewport, const T *p_curren
 	}
 
 	T *override_camera = memnew(T);
-	override_camera->set_name(vformat("Override%s", T ::get_class_static()));
+	override_camera->set_name(vformat("Override%s", T::get_class_static()));
 	p_viewport->add_child(override_camera, false, Node::INTERNAL_MODE_BACK);
 
 	override_camera->make_current();

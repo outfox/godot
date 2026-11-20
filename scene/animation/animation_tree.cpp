@@ -106,7 +106,7 @@ void AnimationNode::get_child_nodes(LocalVector<ChildNode> *r_child_nodes) {
 }
 
 void AnimationNode::blend_animation(ProcessState &p_process_state, AnimationNodeInstance &p_instance, const StringName &p_animation, AnimationMixer::PlaybackInfo &p_playback_info) {
-	p_playback_info.track_weights = &p_instance.track_weights;
+	p_playback_info.track_weights = p_instance.track_weights;
 	p_process_state.tree->make_animation_instance(p_animation, p_playback_info);
 }
 
@@ -178,7 +178,7 @@ AnimationNode::NodeTimeInfo AnimationNode::_blend_node(ProcessState &p_process_s
 		p_other.track_weights.resize(blend_count);
 	}
 
-	real_t *blendw = p_other.track_weights.ptr();
+	real_t *blendw = p_other.track_weights.ptrw();
 	const real_t *blendr = p_instance.track_weights.ptr();
 
 	bool any_valid = false;
@@ -695,7 +695,7 @@ bool AnimationTree::_blend_pre_process(double p_delta, int p_track_count, const 
 
 		// Init node state for root AnimationNode.
 		instance.track_weights.resize(p_track_count);
-		real_t *src_blendsw = instance.track_weights.ptr();
+		real_t *src_blendsw = instance.track_weights.ptrw();
 		for (int i = 0; i < p_track_count; i++) {
 			src_blendsw[i] = 1.0; // By default all go to 1 for the root input.
 		}

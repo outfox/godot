@@ -32,7 +32,6 @@
 
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
-#include "core/io/zip_io.h"
 #include "core/object/callable_mp.h"
 #include "core/os/os.h"
 #include "editor/editor_node.h"
@@ -44,27 +43,45 @@
 
 #include "modules/zip/zip_reader.h"
 
+namespace {
+struct SDKPackage {
+	const char *package;
+	bool required = false;
+};
+
+int complete_utf8_prefix(const PackedByteArray &p_bytes) {
+	const int size = p_bytes.size();
+	for (int tail = 1; tail <= 3 && tail <= size; tail++) {
+		const uint8_t lead = p_bytes[size - tail];
+		if ((lead & 0xc0) == 0x80) {
+			continue;
+		}
+		if ((lead >= 0xc2 && lead <= 0xdf && tail < 2) ||
+				(lead >= 0xe0 && lead <= 0xef && tail < 3) ||
+				(lead >= 0xf0 && lead <= 0xf4 && tail < 4)) {
+			return size - tail;
+		}
+		break;
+	}
+	return size;
+}
+} // namespace
+
 static const char *ANDROID_CLI_URL_LINUX = "https://dl.google.com/android/cli/latest/linux_x86_64/android";
 static const char *ANDROID_CLI_URL_MAC_X86 = "https://dl.google.com/android/cli/latest/darwin_x86_64/android";
 static const char *ANDROID_CLI_URL_MAC_ARM = "https://dl.google.com/android/cli/latest/darwin_arm64/android";
 static const char *ANDROID_CLI_URL_WIN = "https://dl.google.com/android/cli/latest/windows_x86_64/android.exe";
 
 // Android SDK packages.
-static const char *ANDROID_SDK_PACKAGES[] = {
-	"platform-tools",
-	"build-tools/36.1.0", // Should match the value in 'platform/android/java/app/config.gradle#buildTools'.
-	"platforms/android-36",
-	"cmdline-tools/latest",
-	nullptr
+static const int ANDROID_SDK_PACKAGES_COUNT = 6;
+static const SDKPackage ANDROID_SDK_PACKAGES[ANDROID_SDK_PACKAGES_COUNT] = {
+	{ "platform-tools", true },
+	{ "build-tools/36.1.0", true }, // Should match the value in 'platform/android/java/app/config.gradle#buildTools'.
+	{ "platforms/android-36", true },
+	{ "cmdline-tools/latest", true },
+	{ "ndk/29.0.14206865", false }, // Should match the value in 'platform/android/java/app/config.gradle#ndkVersion'.
+	{ "cmake/3.22.1", false }
 };
-// Android NDK packages.
-static const char *ANDROID_NDK_PACKAGES[] = {
-	"ndk/29.0.14206865", // Should match the value in 'platform/android/java/app/config.gradle#ndkVersion'.
-	"cmake/3.22.1",
-	nullptr
-};
-
-static const uint64_t INSTALL_ANDROID_SDK_POLL_TIME = 3000000;
 
 void AndroidSDKManager::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("java_sdk_installed"));
@@ -94,40 +111,33 @@ void AndroidSDKManager::_notification(int p_what) {
 				} break;
 
 				case INSTALLING_ANDROID_SDK: {
-					if (!setup_process_data.is_empty()) {
-						int setup_android_pid = setup_process_data["pid"];
-						if (OS::get_singleton()->is_process_running(setup_android_pid)) {
-							Ref<FileAccess> fa_out = setup_process_data["stdio"];
-							Ref<FileAccess> fa_err = setup_process_data["stderr"];
-							if (fa_out->is_open() && fa_err->is_open() && OS::get_singleton()->get_ticks_usec() - install_android_sdk_time > INSTALL_ANDROID_SDK_POLL_TIME) {
-								install_android_sdk_time = OS::get_singleton()->get_ticks_usec();
-								PackedByteArray buf;
-
-								String output;
-								buf.resize(fa_out->get_length());
-								uint64_t buf_size = fa_out->get_buffer(buf.ptrw(), buf.size());
-								output.append_utf8((const char *)buf.ptr(), buf_size);
-
-								String err_output;
-								buf.resize(fa_err->get_length());
-								buf_size = fa_err->get_buffer(buf.ptrw(), buf.size());
-								err_output.append_utf8((const char *)buf.ptr(), buf_size);
-
-								if (!output.is_empty()) {
-									print_verbose(output);
-									execute_outputs->add_text(output);
-								}
-
-								if (!err_output.is_empty()) {
-									print_verbose(err_output);
-									execute_outputs->add_text(err_output);
-								}
+					if (setup_android_pid > 0) {
+						bool running = OS::get_singleton()->is_process_running(setup_android_pid);
+						bool received_output = false;
+						for (int i = 0; i < 2; i++) {
+							uint8_t buffer[8192];
+							uint64_t size = package_pipes[i]->get_buffer(buffer, sizeof(buffer));
+							if (size > 0 && size <= sizeof(buffer)) {
+								package_output[i].append_array(Span(buffer, size));
+								received_output = true;
 							}
-						} else {
+							const int complete = !running && size == 0 ? package_output[i].size() : complete_utf8_prefix(package_output[i]);
+							if (complete > 0) {
+								execute_outputs->add_text(String::utf8((const char *)package_output[i].ptr(), complete));
+								package_output[i] = package_output[i].slice(complete);
+							}
+						}
+						if (!running && !received_output) {
+							for (int i = 0; i < 2; i++) {
+								package_pipes[i].unref();
+							}
 							int exit_code = OS::get_singleton()->get_process_exit_code(setup_android_pid);
-							print_verbose("Exit code: " + itos(exit_code));
-							execute_outputs->add_text("\nExit code: " + itos(exit_code));
-							_android_sdk_installed(exit_code);
+							setup_android_pid = -1;
+							if (exit_code != 0) {
+								_android_sdk_install_failed(vformat(TTR("Android SDK package installation failed with exit code %d."), exit_code));
+							} else {
+								_install_android_sdk_packages();
+							}
 						}
 					}
 				} break;
@@ -172,7 +182,6 @@ void AndroidSDKManager::_cancel_setup() {
 
 		case INSTALLING_ANDROID_SDK: {
 			print_verbose("Canceling Android SDK installation.");
-			int setup_android_pid = setup_process_data["pid"];
 			if (setup_android_pid > 0 && OS::get_singleton()->is_process_running(setup_android_pid)) {
 				OS::get_singleton()->kill(setup_android_pid);
 			}
@@ -193,8 +202,8 @@ void AndroidSDKManager::_cancel_setup() {
 	on_setup_cancelled = Callable();
 }
 
-void AndroidSDKManager::_show_setup_dialog(SetupStatus p_status) {
-	if (current_setup_status != IDLE) {
+void AndroidSDKManager::_show_setup_dialog(SetupStatus p_status, bool p_clear_output, bool p_reset_size) {
+	if (current_setup_status != IDLE && current_setup_status != p_status) {
 		_hide_setup_dialog(current_setup_status);
 	}
 	current_setup_status = p_status;
@@ -247,12 +256,16 @@ void AndroidSDKManager::_show_setup_dialog(SetupStatus p_status) {
 	}
 
 	get_ok_button()->set_visible(ok_button_visible);
-	execute_outputs->clear();
+	if (p_clear_output) {
+		execute_outputs->clear();
+	}
 	execute_outputs->set_visible(outputs_visible);
 	setup_label->set_text(label);
 	setup_progress_bar->set_indeterminate(true);
 	setup_progress_bar->set_visible(show_progress_bar);
-	reset_size();
+	if (p_reset_size) {
+		reset_size();
+	}
 	popup_centered();
 
 	set_process(true);
@@ -276,6 +289,14 @@ void AndroidSDKManager::_hide_setup_dialog(SetupStatus p_status) {
 		case PROMPTING_JAVA_SDK_SETUP: {
 			disconnect(SNAME("confirmed"), callable_mp(this, &AndroidSDKManager::_setup_java_sdk));
 		} break;
+		case INSTALLING_ANDROID_SDK: {
+			setup_android_pid = -1;
+			index_sdk_package_being_installed = 0;
+			for (int i = 0; i < 2; i++) {
+				package_pipes[i].unref();
+				package_output[i].clear();
+			}
+		} break;
 		default: {
 		} break;
 	}
@@ -284,6 +305,7 @@ void AndroidSDKManager::_hide_setup_dialog(SetupStatus p_status) {
 	set_process(false);
 
 	hide();
+	reset_size();
 
 	execute_outputs->clear();
 	execute_outputs->set_visible(false);
@@ -312,10 +334,6 @@ void AndroidSDKManager::run_setup(const Callable &p_on_setup_completed, const Ca
 
 void AndroidSDKManager::_install_android_sdk_packages() {
 	String cli_bin = get_android_cli_path();
-	if (!FileAccess::exists(cli_bin)) {
-		ERR_PRINT("Unable to find android-cli binary");
-		return;
-	}
 
 	String default_android_sdk_path = EditorPaths::get_singleton()->get_default_android_sdk_path();
 
@@ -324,49 +342,51 @@ void AndroidSDKManager::_install_android_sdk_packages() {
 	cli_args.push_back("sdk");
 	cli_args.push_back("install");
 
-	const char **sdk_packages = ANDROID_SDK_PACKAGES;
-	while (*sdk_packages) {
-		String package = String(*sdk_packages);
-		print_verbose("Requesting Android SDK package " + package);
-		cli_args.push_back(package);
-		sdk_packages++;
+	while (index_sdk_package_being_installed < ANDROID_SDK_PACKAGES_COUNT) {
+		if (ANDROID_SDK_PACKAGES[index_sdk_package_being_installed].required) {
+			break;
+		}
+		index_sdk_package_being_installed++;
+	}
+	if (index_sdk_package_being_installed >= ANDROID_SDK_PACKAGES_COUNT) {
+		// No more required packages to install.
+		_android_sdk_installed();
+		return;
 	}
 
-	const char **ndk_packages = ANDROID_NDK_PACKAGES;
-	while (*ndk_packages) {
-		String package = String(*ndk_packages);
-		print_verbose("Requesting Android NDK package " + package);
-		cli_args.push_back(package);
-		ndk_packages++;
-	}
+	SDKPackage current_package = ANDROID_SDK_PACKAGES[index_sdk_package_being_installed++];
+	String package = String(current_package.package);
+	print_verbose("Requesting Android SDK package " + package);
+	cli_args.push_back(package);
 
-	print_verbose("Installing Android SDK / NDK packages to " + default_android_sdk_path);
-	setup_process_data = OS::get_singleton()->execute_with_pipe(cli_bin, cli_args, false);
-	if (!setup_process_data.has("pid") || setup_process_data["pid"].operator int() <= 0) {
-		ERR_PRINT("Installation of Android SDK packages failed.");
-		_cancel_setup();
-	} else {
-		install_android_sdk_time = OS::get_singleton()->get_ticks_usec();
-		_show_setup_dialog(INSTALLING_ANDROID_SDK);
+	_show_setup_dialog(INSTALLING_ANDROID_SDK, false, false);
+	execute_outputs->add_text(vformat(TTR("Installing Android SDK package: %s"), package) + "\n");
+	Dictionary process = OS::get_singleton()->execute_with_pipe(cli_bin, cli_args, false);
+	if (!process.has("pid")) {
+		_android_sdk_install_failed(vformat(TTR("Could not start the Android SDK installer: %s"), cli_bin));
+		return;
 	}
+	setup_android_pid = process["pid"];
+	package_pipes[0] = process["stdio"];
+	package_pipes[1] = process["stderr"];
 }
 
-void AndroidSDKManager::_android_sdk_installed(int p_exit_code) {
-	if (p_exit_code != 0) {
-		ERR_PRINT("Installation of Android SDK packages failed. Check output for the error.");
-		execute_outputs->add_text(TTR("Installation of Android SDK packages failed. Check output for the error."));
-	} else {
-		// Update the editor settings.
-		EditorSettings::get_singleton()->set_setting("export/android/android_sdk_path", EditorPaths::get_singleton()->get_default_android_sdk_path());
-		EditorSettings::get_singleton()->save();
+void AndroidSDKManager::_android_sdk_install_failed(const String &p_message) {
+	ERR_PRINT(p_message);
+	setup_label->set_text(p_message);
+	setup_progress_bar->hide();
+	set_process(false);
+}
 
-		_hide_setup_dialog(current_setup_status);
-		emit_signal(SNAME("android_sdk_installed"));
+void AndroidSDKManager::_android_sdk_installed() {
+	String default_android_sdk_path = EditorPaths::get_singleton()->get_default_android_sdk_path();
+	EditorSettings::get_singleton()->set_setting("export/android/android_sdk_path", default_android_sdk_path);
+	EditorSettings::get_singleton()->save();
 
-		// Run the next setup step..
-		if (on_setup_completed.is_valid()) {
-			on_setup_completed.call_deferred();
-		}
+	_hide_setup_dialog(current_setup_status);
+	emit_signal(SNAME("android_sdk_installed"));
+	if (on_setup_completed.is_valid()) {
+		on_setup_completed.call_deferred();
 	}
 }
 
@@ -379,7 +399,7 @@ void AndroidSDKManager::_setup_android_sdk() {
 	if (_is_android_sdk_setup(EditorPaths::get_singleton()->get_default_android_sdk_path())) {
 		// Check if the Android SDK is already set up in the default path. If it's, we just update the editor settings
 		// to point to the default Android SDK path.
-		_android_sdk_installed(0);
+		_android_sdk_installed();
 	} else {
 		if (_is_online()) {
 			String cli_bin = get_android_cli_path();
@@ -710,18 +730,19 @@ bool AndroidSDKManager::_is_android_sdk_setup(const String &p_android_sdk_path, 
 		Error errn;
 
 		// Check the Android SDK packages are installed.
-		const char **packages = ANDROID_SDK_PACKAGES;
-		while (*packages) {
-			String package = String(*packages);
+		for (int i = 0; i < ANDROID_SDK_PACKAGES_COUNT; i++) {
+			SDKPackage sdk_package = ANDROID_SDK_PACKAGES[i];
+			if (!sdk_package.required) {
+				continue;
+			}
+			String package = String(sdk_package.package);
 			Ref<DirAccess> da = DirAccess::open(p_android_sdk_path.path_join(package), &errn);
 			if (errn != OK) {
 				if (r_error) {
-					*r_error += TTR("Unable to find Android SDK package '") + package + "'.\n";
+					*r_error += vformat(TTR("Unable to find Android SDK package '%s'."), package) + "\n";
 				}
 				return false;
 			}
-
-			packages++;
 		}
 
 		// Validate that adb is available.
