@@ -39,6 +39,47 @@ TEST_FORCE_LINK(test_button)
 
 namespace TestButton {
 
+TEST_CASE("[SceneTree][Button] Local touch and drag respect the visible part of a scaled button") {
+	Button *button = memnew(Button);
+	SceneTree::get_singleton()->get_root()->add_child(button);
+	const Vector2 viewport_size = button->get_viewport_rect().size;
+	button->set_size(viewport_size);
+	button->set_position(viewport_size * 0.25);
+	button->set_scale(Vector2(2, 2));
+	button->set_toggle_mode(true);
+	const Vector2 inside = viewport_size * 0.25;
+	const Vector2 clipped = viewport_size * 0.5;
+	Vector2 start = inside;
+	Vector2 end = inside;
+	bool expect_pressed = true;
+	SUBCASE("Inside the viewport") {}
+	SUBCASE("Press on the clipped part of the button") {
+		start = clipped;
+		end = clipped;
+		expect_pressed = false;
+	}
+	SUBCASE("Drag from the visible part to the clipped part") {
+		end = clipped;
+		expect_pressed = false;
+	}
+	Ref<InputEventScreenTouch> touch;
+	touch.instantiate();
+	touch->set_position(start);
+	touch->set_pressed(true);
+	static_cast<Control *>(button)->gui_input(touch);
+	if (end != start) {
+		Ref<InputEventScreenDrag> drag;
+		drag.instantiate();
+		drag->set_position(end);
+		static_cast<Control *>(button)->gui_input(drag);
+	}
+	touch->set_position(end);
+	touch->set_pressed(false);
+	static_cast<Control *>(button)->gui_input(touch);
+	CHECK(button->is_pressed() == expect_pressed);
+	memdelete(button);
+}
+
 TEST_CASE("[SceneTree][Button] is_hovered()") {
 	// Create new button instance.
 	Button *button = memnew(Button);

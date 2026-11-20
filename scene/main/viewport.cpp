@@ -787,7 +787,7 @@ void Viewport::_process_picking() {
 	if (Object::cast_to<Window>(this) && Input::get_singleton()->get_mouse_mode() == Input::MouseMode::MOUSE_MODE_CAPTURED) {
 		return;
 	}
-	if (!gui.mouse_in_viewport || gui.subwindow_over) {
+	if (!gui_is_mouse_in_viewport()) {
 		// Clear picking events if the mouse has left the viewport or is over an embedded window.
 		// These are locations, that are expected to not trigger physics picking.
 		physics_picking_events.clear();

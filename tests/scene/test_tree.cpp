@@ -34,9 +34,45 @@ TEST_FORCE_LINK(test_tree)
 
 #ifndef ADVANCED_GUI_DISABLED
 
+#include "core/input/input_map.h"
 #include "scene/gui/tree.h"
+#include "scene/main/scene_tree.h"
+#include "scene/main/window.h"
+#include "tests/display_server_mock.h"
 
 namespace TestTree {
+
+TEST_CASE("[SceneTree][Tree] Drag autoscroll uses empty edge margins and stops under a dialog") {
+	Window *window = SceneTree::get_singleton()->get_root();
+	Tree *tree = memnew(Tree);
+	window->add_child(tree);
+	tree->set_position(Point2(20, 20));
+	tree->set_size(Size2(120, 80));
+	TreeItem *root_item = tree->create_item();
+	for (int i = 0; i < 50; i++) {
+		tree->create_item(root_item);
+	}
+	tree->scroll_to_item(root_item);
+	tree->force_drag(Dictionary(), nullptr);
+	const Point2i margin(80, 101);
+	SEND_GUI_MOUSE_MOTION_EVENT(margin, MouseButtonMask::LEFT, Key::NONE);
+	CHECK_FALSE(window->gui_get_hovered_control());
+	SceneTree::get_singleton()->process(0.1);
+	const real_t offset = tree->get_scroll().y;
+	CHECK(offset > 0);
+
+	Window *dialog = memnew(Window);
+	dialog->hide();
+	window->add_child(dialog);
+	dialog->set_flag(Window::FLAG_BORDERLESS, true);
+	dialog->popup(Rect2i(60, 90, 60, 60));
+	SEND_GUI_MOUSE_MOTION_EVENT(margin + Point2i(1, 0), MouseButtonMask::LEFT, Key::NONE);
+	SceneTree::get_singleton()->process(0.1);
+	CHECK(tree->get_scroll().y == offset);
+	window->gui_cancel_drag();
+	memdelete(dialog);
+	memdelete(tree);
+}
 
 TEST_CASE("[SceneTree][Tree]") {
 	SUBCASE("[Tree] Create and remove items.") {
