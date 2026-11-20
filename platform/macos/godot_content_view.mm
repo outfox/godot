@@ -41,6 +41,18 @@
 #include "core/profiling/profiling.h"
 #include "main/main.h"
 
+#import <IOKit/hidsystem/IOLLEvent.h>
+
+static constexpr bool is_shift_pressed(int p_key, unsigned int p_flags) {
+	const int side = (p_key == 0x38) ? NX_DEVICELSHIFTKEYMASK : NX_DEVICERSHIFTKEYMASK;
+	const unsigned int shift_sides = p_flags & (NX_DEVICELSHIFTKEYMASK | NX_DEVICERSHIFTKEYMASK);
+	// Some event sources supply only the device-independent Shift flag.
+	return (p_flags & NSEventModifierFlagShift) && (!shift_sides || (shift_sides & side));
+}
+
+static_assert(!is_shift_pressed(0x38, NSEventModifierFlagShift | NX_DEVICERSHIFTKEYMASK));
+static_assert(!is_shift_pressed(0x3c, NSEventModifierFlagShift | NX_DEVICELSHIFTKEYMASK));
+
 @implementation GodotContentLayerDelegate
 
 - (id)init {
@@ -769,12 +781,8 @@
 			ke.pressed = false;
 		}
 	} else if (key == 0x38 || key == 0x3c) {
-		if (mod & NSEventModifierFlagShift) {
-			mod &= ~NSEventModifierFlagShift;
-			ke.pressed = true;
-		} else {
-			ke.pressed = false;
-		}
+		ke.pressed = is_shift_pressed(key, mod);
+		mod &= ~NSEventModifierFlagShift;
 	} else if (key == 0x3a || key == 0x3d) {
 		if (mod & NSEventModifierFlagOption) {
 			mod &= ~NSEventModifierFlagOption;

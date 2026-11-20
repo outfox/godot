@@ -1237,7 +1237,7 @@ DisplayServerWeb::DisplayServerWeb(const String &p_rendering_driver, DisplayServ
 	godot_js_input_paste_cb(&DisplayServerWeb::update_clipboard_callback);
 	godot_js_input_drop_files_cb(&DisplayServerWeb::drop_files_js_callback);
 	godot_js_input_gamepad_cb(&DisplayServerWeb::gamepad_callback);
-	godot_js_set_ime_cb(&DisplayServerWeb::ime_callback, &DisplayServerWeb::key_callback, key_event.code, key_event.key);
+	godot_js_set_ime_cb(&DisplayServerWeb::ime_callback);
 
 	// JS Display interface (js/libs/library_godot_display.js)
 	godot_js_display_fullscreen_cb(&DisplayServerWeb::fullscreen_change_callback);
