@@ -171,6 +171,7 @@ private:
 
 	Vector<KeyEvent> key_event_buffer;
 	int key_event_pos = 0;
+	unsigned int pressed_shift_sides = 0;
 
 	id menu_delegate = nullptr;
 	NativeMenuMacOS *native_menu = nullptr;
@@ -257,6 +258,7 @@ public:
 	void send_window_event(const WindowData &p_wd, DisplayServerEnums::WindowEvent p_event) const;
 	virtual void send_window_event_by_id(DisplayServerEnums::WindowEvent p_event, DisplayServerEnums::WindowID p_id = DisplayServerEnums::MAIN_WINDOW_ID) const override;
 	void release_pressed_events();
+	bool update_shift_pressed(bool p_left, unsigned int p_flags);
 	void sync_mouse_state();
 	void get_key_modifier_state(unsigned int p_macos_state, Ref<InputEventWithModifiers> r_state) const;
 	void update_mouse_pos(WindowData &p_wd, NSPoint p_location_in_window);
