@@ -614,12 +614,10 @@ bool JavaClass::_get_field(jobject p_instance, const StringName &p_name, Variant
 }
 
 bool JavaClass::_set_field(jobject p_instance, const StringName &p_name, const Variant &p_property) {
-	if (fields.has(p_name)) {
-		const JavaClass::FieldInfo field_info = fields[p_name];
-
+	if (const FieldInfo *field_info = fields.getptr(p_name)) {
 		JNIEnv *env = get_jni_env();
 		ERR_FAIL_NULL_V(env, false);
-		return _set_field_value(env, p_instance, _class, field_info, p_property);
+		return _set_field_value(env, p_instance, _class, *field_info, p_property);
 	}
 
 	// Check the parent class.

@@ -48,7 +48,8 @@ TEST_CASE("[SceneTree][VirtualJoystick] Only the active pointer can move or rele
 	Control *control = joystick;
 	SIGNAL_WATCH(joystick, "tapped");
 	SIGNAL_WATCH(joystick, "released");
-	Array no_args = { Array() };
+	Array no_args;
+	no_args.push_back(Array());
 	Array zero_vector = { { Vector2() } };
 
 	Ref<InputEventMouseButton> mouse;
@@ -60,6 +61,7 @@ TEST_CASE("[SceneTree][VirtualJoystick] Only the active pointer can move or rele
 	mouse->set_pressed(false);
 	control->gui_input(mouse);
 	SIGNAL_CHECK_FALSE("released");
+	SIGNAL_CHECK_FALSE("tapped");
 
 	Ref<InputEventScreenTouch> touch;
 	touch.instantiate();
@@ -72,6 +74,7 @@ TEST_CASE("[SceneTree][VirtualJoystick] Only the active pointer can move or rele
 	control->gui_input(motion);
 	control->gui_input(mouse);
 	SIGNAL_CHECK_FALSE("released");
+	SIGNAL_CHECK_FALSE("tapped");
 	touch->set_pressed(false);
 	control->gui_input(touch);
 	SIGNAL_CHECK("released", zero_vector);

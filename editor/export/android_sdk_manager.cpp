@@ -48,6 +48,23 @@ struct SDKPackage {
 	const char *package;
 	bool required = false;
 };
+
+int complete_utf8_prefix(const PackedByteArray &p_bytes) {
+	const int size = p_bytes.size();
+	for (int tail = 1; tail <= 3 && tail <= size; tail++) {
+		const uint8_t lead = p_bytes[size - tail];
+		if ((lead & 0xc0) == 0x80) {
+			continue;
+		}
+		if ((lead >= 0xc2 && lead <= 0xdf && tail < 2) ||
+				(lead >= 0xe0 && lead <= 0xef && tail < 3) ||
+				(lead >= 0xf0 && lead <= 0xf4 && tail < 4)) {
+			return size - tail;
+		}
+		break;
+	}
+	return size;
+}
 } // namespace
 
 static const char *ANDROID_CLI_URL_LINUX = "https://dl.google.com/android/cli/latest/linux_x86_64/android";
@@ -104,13 +121,14 @@ void AndroidSDKManager::_notification(int p_what) {
 								package_output[i].append_array(Span(buffer, size));
 								received_output = true;
 							}
+							const int complete = !running && size == 0 ? package_output[i].size() : complete_utf8_prefix(package_output[i]);
+							if (complete > 0) {
+								execute_outputs->add_text(String::utf8((const char *)package_output[i].ptr(), complete));
+								package_output[i] = package_output[i].slice(complete);
+							}
 						}
 						if (!running && !received_output) {
 							for (int i = 0; i < 2; i++) {
-								if (!package_output[i].is_empty()) {
-									execute_outputs->add_text(String::utf8((const char *)package_output[i].ptr(), package_output[i].size()));
-									package_output[i].clear();
-								}
 								package_pipes[i].unref();
 							}
 							int exit_code = OS::get_singleton()->get_process_exit_code(setup_android_pid);
