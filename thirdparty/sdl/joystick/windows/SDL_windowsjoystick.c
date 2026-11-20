@@ -331,17 +331,10 @@ void WINDOWS_JoystickQuit(void);
 
 static bool WINDOWS_JoystickInit(void)
 {
-    if (!SDL_XINPUT_JoystickInit()) {
-        WINDOWS_JoystickQuit();
-        return false;
-    }
-
-    if (!SDL_DINPUT_JoystickInit()) {
-        WINDOWS_JoystickQuit();
-        return false;
-    }
-
     WIN_InitDeviceNotification();
+
+    SDL_XINPUT_JoystickInit();
+    SDL_DINPUT_JoystickInit();
 
 #if !defined(SDL_PLATFORM_XBOXONE) && !defined(SDL_PLATFORM_XBOXSERIES)
     s_bJoystickThread = SDL_GetHintBoolean(SDL_HINT_JOYSTICK_THREAD, true);
