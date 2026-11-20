@@ -1260,7 +1260,9 @@ void DisplayServerMacOS::set_confinement_window(DisplayServerEnums::WindowID p_w
 		if ([wd.window_object respondsToSelector:@selector(setMouseConfinementRect:)]) {
 			confinement_window = p_window;
 			CGAssociateMouseAndMouseCursorPosition(true);
-			[wd.window_object setStyleMask:[wd.window_object styleMask] & ~NSWindowStyleMaskResizable];
+			if (!wd.fullscreen && !wd.fs_transition) {
+				[wd.window_object setStyleMask:[wd.window_object styleMask] & ~NSWindowStyleMaskResizable];
+			}
 			[wd.window_object setMouseConfinementRect:[wd.window_view frame]];
 		} else {
 			CGAssociateMouseAndMouseCursorPosition(false);
@@ -2413,7 +2415,7 @@ void DisplayServerMacOS::window_set_mode(DisplayServerEnums::WindowMode p_mode, 
 		} break;
 		case DisplayServerEnums::WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
 		case DisplayServerEnums::WINDOW_MODE_FULLSCREEN: {
-			if (wd.resize_disabled) { // Fullscreen window should be resizable to work.
+			if (wd.resize_disabled || confinement_window == p_window) { // Fullscreen window should be resizable to work.
 				[wd.window_object setStyleMask:[wd.window_object styleMask] | NSWindowStyleMaskResizable];
 			}
 			[wd.window_object setContentMinSize:NSMakeSize(0, 0)];

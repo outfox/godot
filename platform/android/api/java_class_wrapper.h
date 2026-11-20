@@ -34,6 +34,7 @@
 #include "core/variant/typed_array.h"
 
 #ifdef ANDROID_ENABLED
+#include "core/os/mutex.h"
 #include "core/templates/rb_map.h"
 
 #include <android/log.h>
@@ -80,11 +81,11 @@ class JavaClass : public RefCounted {
 	struct FieldInfo {
 		bool _static = false;
 		bool _final = false;
-		bool _constant_value_initialized = false;
+		mutable bool _constant_value_initialized = false;
 		uint32_t field_type = 0;
 		StringName field_sig;
 		jfieldID field = nullptr;
-		Variant constant_value;
+		mutable Variant constant_value;
 	};
 
 	_FORCE_INLINE_ static void _convert_to_variant_type(int p_sig, Variant::Type &r_type, float &likelihood) {
@@ -205,6 +206,7 @@ class JavaClass : public RefCounted {
 	String java_constructor_name;
 	HashMap<StringName, List<MethodInfo>> methods;
 	HashMap<StringName, FieldInfo> fields;
+	Mutex constant_values_mutex;
 	jclass _class;
 	bool is_interface;
 #endif

@@ -3351,7 +3351,7 @@ void DisplayServerWindows::window_set_ime_active(const bool p_active, DisplaySer
 		wd.ime_active = true;
 		ImmAssociateContext(wd.hWnd, wd.im_himc);
 		CreateCaret(wd.hWnd, nullptr, 1, 1);
-		window_set_ime_position(wd.im_position, p_window);
+		window_set_ime_position(wd.im_position, window_id);
 	} else {
 		ImmAssociateContext(wd.hWnd, (HIMC) nullptr);
 		DestroyCaret();
