@@ -1110,6 +1110,7 @@ Patches:
 - `0006-ios-iostream-no-prefpath.patch` ([GH-123899](https://github.com/godotengine/godot/pull/123899))
 - `0007-fix-linux-getenv-unsafe.patch` ([GH-124017](https://github.com/godotengine/godot/pull/124017))
 - `0008-fix-gameinput-and-2c-paddles.patch` ([outfox/godot#15](https://github.com/outfox/godot/pull/15))
+- `0009-log-directinput-init-failure.patch` ([outfox/godot#16](https://github.com/outfox/godot/pull/16#discussion_r4644686973))
 
 
 ## smaa

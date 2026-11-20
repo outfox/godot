@@ -77,6 +77,7 @@ private:
 
 	Ref<ButtonGroup> button_group;
 
+	bool _has_visible_point(const Point2 &p_point) const;
 	void _unpress_group();
 	void _pressed();
 	void _toggled(bool p_pressed);
