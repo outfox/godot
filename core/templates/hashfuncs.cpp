@@ -30,6 +30,8 @@
 
 #include "hashfuncs.h"
 
+#include <cstring>
+
 uint32_t hash_murmur3_one_float(float p_in, uint32_t p_seed) {
 	union {
 		float f;
@@ -76,10 +78,9 @@ uint32_t hash_murmur3_buffer(const void *key, int length, const uint32_t seed) {
 	const uint32_t c1 = 0xcc9e2d51;
 	const uint32_t c2 = 0x1b873593;
 
-	const uint32_t *blocks = (const uint32_t *)(data + nblocks * 4);
-
-	for (int i = -nblocks; i; i++) {
-		uint32_t k1 = blocks[i];
+	for (int i = 0; i < nblocks; i++) {
+		uint32_t k1;
+		memcpy(&k1, data + i * sizeof(k1), sizeof(k1));
 
 		k1 *= c1;
 		k1 = hash_rotl32(k1, 15);
