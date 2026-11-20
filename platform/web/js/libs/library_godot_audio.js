@@ -329,7 +329,7 @@ function GodotSampleDriver(audioContext, positionWorkletPath) {
 				}
 			};
 			worklet.parameters.get('id').setValueAtTime(workletId, ctx.currentTime);
-			worklet.parameters.get('scale').setValueAtTime(pitchScale, ctx.currentTime);
+			worklet.parameters.get('scale').setValueAtTime(paused ? 0 : pitchScale, ctx.currentTime);
 			source.connect(worklet);
 		}
 		/** @param {!Array<number>} newBuses */
@@ -902,7 +902,7 @@ const _GodotAudioSampleDriver = {
 	},
 
 	godot_audio_sample_start__proxy: 'sync',
-	godot_audio_sample_start__sig: 'viiiifii',
+	godot_audio_sample_start__sig: 'viiiffii',
 	godot_audio_sample_start: function (p_playback, p_stream, p_bus, p_offset, p_pitch_scale, p_volume, p_paused) {
 		if (!GodotAudio.sample_driver) {
 			return;

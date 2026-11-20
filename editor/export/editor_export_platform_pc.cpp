@@ -263,7 +263,10 @@ Error EditorExportPlatformPC::_unzip_debugsymbols(Ref<DirAccess> &p_da, const St
 		add_message(EXPORT_MESSAGE_WARNING, TTR("Prepare Templates"), vformat(TTR("Failed to copy file \"%s\"."), p_path));
 		return ERR_CANT_CREATE;
 	}
-	f->store_buffer(extracted_data);
+	if (!f->store_buffer(extracted_data)) {
+		add_message(EXPORT_MESSAGE_WARNING, TTR("Prepare Templates"), vformat(TTR("Failed to write extracted debug symbols to \"%s\"."), p_path));
+		return ERR_FILE_CANT_WRITE;
+	}
 
 	return OK;
 }
@@ -272,30 +275,50 @@ bool EditorExportPlatformPC::_copy_debugsymbols(Ref<DirAccess> &p_da, const Stri
 	r_err = OK;
 
 	String sym_path = p_symbols_path + ".debugsymbols";
-	String zip_path = p_symbols_path + ".debugsymbols.zip";
-	String zip_path_full = p_symbols_path.simplify_path().path_join(get_official_debugsymbols_file_name(p_symbols_path.get_file()));
-
-	if (FileAccess::exists(sym_path)) {
-		r_err = p_da->copy(sym_path, p_path + ".debugsymbols");
-	} else if (FileAccess::exists(zip_path)) {
-		r_err = _unzip_debugsymbols(p_da, p_path + ".debugsymbols", p_symbols_path.get_file() + ".debugsymbols", p_symbols_path + ".debugsymbols.zip");
-	} else if (FileAccess::exists(zip_path_full)) {
-		r_err = _unzip_debugsymbols(p_da, p_path + ".debugsymbols", p_symbols_path.get_file() + ".debugsymbols", zip_path_full);
-	} else {
-		return false;
+	Ref<DirAccess> staging;
+	if (!FileAccess::exists(sym_path)) {
+		String zip_path = sym_path + ".zip";
+		if (!FileAccess::exists(zip_path)) {
+			zip_path = p_symbols_path.simplify_path().path_join(get_official_debugsymbols_file_name(p_symbols_path.get_file()));
+			if (!FileAccess::exists(zip_path)) {
+				return false;
+			}
+		}
+		staging = DirAccess::create_temp("export_debugsymbols", false, &r_err);
+		if (staging.is_null()) {
+			add_message(EXPORT_MESSAGE_ERROR, TTR("Prepare Templates"), TTR("Could not create a temporary directory to validate debug symbols."));
+			return false;
+		}
+		sym_path = staging->get_current_dir().path_join(sym_path.get_file());
+		r_err = _unzip_debugsymbols(staging, sym_path, sym_path.get_file(), zip_path);
+		if (r_err != OK) {
+			return false;
+		}
 	}
+	const String destination = p_path + ".debugsymbols";
 	Vector<String> exec_debug_ids = OS::get_singleton()->get_debug_build_id(p_path);
-	Vector<String> symb_debug_ids = OS::get_singleton()->get_debug_build_id(p_path + ".debugsymbols");
-	print_line("Executable debug IDs: ", exec_debug_ids);
-	print_line("Symbols debug IDs: ", symb_debug_ids);
+	Vector<String> symb_debug_ids = OS::get_singleton()->get_debug_build_id(sym_path);
 	if (exec_debug_ids != symb_debug_ids) {
 		add_message(EXPORT_MESSAGE_WARNING, TTR("Prepare Templates"), vformat(TTR("Executable and symbols debug ID mismatch: %s != %s."), exec_debug_ids, symb_debug_ids));
-		return false;
-	}
-	if (r_err == OK) {
-		r_err = fixup_debug_symbol_link(p_path, p_path.get_file() + ".debugsymbols");
+		if (!FileAccess::exists(destination)) {
+			return false;
+		}
+		if (OS::get_singleton()->get_debug_build_id(destination) != exec_debug_ids) {
+			r_err = p_da->remove(destination);
+			if (r_err != OK) {
+				add_message(EXPORT_MESSAGE_ERROR, TTR("Prepare Templates"), vformat(TTR("Could not remove stale debug symbols from the export: \"%s\"."), destination));
+			}
+			return false;
+		}
+	} else {
+		r_err = p_da->copy(sym_path, destination);
+		if (r_err != OK) {
+			add_message(EXPORT_MESSAGE_ERROR, TTR("Prepare Templates"), vformat(TTR("Failed to copy debug symbols to \"%s\"."), destination));
+			return false;
+		}
 	}
 
+	r_err = fixup_debug_symbol_link(p_path, p_path.get_file() + ".debugsymbols");
 	return r_err == OK;
 }
 
@@ -348,13 +371,13 @@ Error EditorExportPlatformPC::prepare_template(const Ref<EditorExportPreset> &p_
 			}
 		}
 	}
-	if (err == OK && copy_debug_symbols) {
-		// We don't copy symbols for the wrapper as they are trivial.
-		_copy_debugsymbols(da, p_path, template_path, err);
-	}
 	if (err != OK) {
 		add_message(EXPORT_MESSAGE_ERROR, TTR("Prepare Template"), TTR("Failed to copy export template."));
 		return err;
+	}
+	if (copy_debug_symbols) {
+		// We don't copy symbols for the wrapper as they are trivial.
+		_copy_debugsymbols(da, p_path, template_path, err);
 	}
 
 	return err;

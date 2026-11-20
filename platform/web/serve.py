@@ -63,8 +63,10 @@ def generate_snakeoil():
 
 
 def ssl_wrap_socket(httpd, keyfile, certfile):
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     if keyfile and certfile:
         print(f"Using certificate: '{certfile}', key: '{keyfile}'")
+        context.load_cert_chain(certfile=certfile, keyfile=keyfile)
     else:
         if bool(keyfile):
             print("Ignoring supplied private key since no certificate was specified.")
@@ -73,23 +75,19 @@ def ssl_wrap_socket(httpd, keyfile, certfile):
 
         print("Generating self-signed certificate")
 
-        from tempfile import NamedTemporaryFile
+        from tempfile import TemporaryDirectory
 
         key, cert = generate_snakeoil()
-        tmp_keyfile = NamedTemporaryFile(delete_on_close=False)
-        tmp_keyfile.write(key)
-        tmp_keyfile.close()
-        tmp_certfile = NamedTemporaryFile(delete_on_close=False)
-        tmp_certfile.write(cert)
-        tmp_certfile.close()
-        keyfile = tmp_keyfile.name
-        certfile = tmp_certfile.name
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.load_cert_chain(certfile=certfile, keyfile=keyfile)
+        with TemporaryDirectory() as temp_dir:
+            pem = Path(temp_dir) / "certificate.pem"
+            pem.write_bytes(key + cert)
+            context.load_cert_chain(certfile=pem)
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
 
 def serve(root, port, https, run_browser, key="", cert=""):
+    key = Path(key).resolve() if key else ""
+    cert = Path(cert).resolve() if cert else ""
     os.chdir(root)
 
     address = ("", port)
@@ -133,11 +131,5 @@ if __name__ == "__main__":
     parser.set_defaults(browser=True)
     args = parser.parse_args()
 
-    key = Path(args.keyfile).resolve() if args.keyfile else ""
-    cert = Path(args.certfile).resolve() if args.certfile else ""
-
-    # Change to the directory where the script is located,
-    # so that the script can be run from any location.
-    os.chdir(Path(__file__).resolve().parent)
-
-    serve(args.root, args.port, args.https, args.browser, key=key, cert=cert)
+    root = Path(__file__).resolve().parent / args.root
+    serve(root, args.port, args.https, args.browser, key=args.keyfile, cert=args.certfile)

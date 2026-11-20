@@ -10,6 +10,10 @@ this platform such as the html shell (web page).
 
 ## Documentation
 
+For local HTTPS with a generated certificate, run
+`uv run --with-requirements platform/web/requirements.txt platform/web/serve.py --https`.
+The server also accepts an existing certificate and key with `--certfile` and `--keyfile`.
+
 - [Compiling for the Web](https://docs.godotengine.org/en/latest/engine_details/development/compiling/compiling_for_web.html)
   - Instructions on building this platform port from source.
 - [Exporting for the Web](https://docs.godotengine.org/en/latest/tutorials/export/exporting_for_web.html)

@@ -265,6 +265,7 @@ Node *SceneState::_instantiate(GenEditState p_edit_state, LocalVector<DeferredNo
 	bool gen_node_path_cache = p_edit_state != GEN_EDIT_STATE_DISABLED && node_path_cache.is_empty();
 
 	HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> resources_local_to_scenes; // Record the mappings in sub-scenes.
+	HashMap<Ref<Resource>, Ref<Resource>> inherited_resources;
 
 	LocalVector<DeferredNodePathProperties> deferred_node_paths;
 
@@ -508,12 +509,18 @@ Node *SceneState::_instantiate(GenEditState p_edit_state, LocalVector<DeferredNo
 
 						if (value.get_type() == Variant::OBJECT) {
 							Ref<Resource> res = value;
-							if (p_edit_state == GEN_EDIT_STATE_DISABLED) {
+							if (p_edit_state == GEN_EDIT_STATE_DISABLED || (p_edit_state == GEN_EDIT_STATE_MAIN_INHERITED && res.is_valid() && res->is_local_to_scene())) {
 								value = make_local_resource(value, n, resources_local_to_scenes, node, snames[nprops[j].name], i, ret_nodes, p_edit_state);
 							} else if (p_edit_state == GEN_EDIT_STATE_MAIN && res.is_valid() && res->is_local_to_scene()) {
 								Node *base = (i == 0 || node->is_instance()) ? node : (node->get_owner() ? node->get_owner() : ret_nodes[0]);
 								res->configure_for_local_scene(base, resources_local_to_scenes[base]);
 								resources_local_to_scenes[base][res] = res;
+							} else if (is_inherited_scene && res.is_valid()) {
+								auto copy = inherited_resources.find(res);
+								if (!copy) {
+									copy = inherited_resources.insert(res, value.duplicate(true));
+								}
+								value = copy->value;
 							}
 						} else {
 							// Making sure that instances of inherited scenes don't share the same

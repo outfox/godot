@@ -1628,7 +1628,7 @@ void SpriteFramesEditor::_update_anim_loop_button() {
 		anim_loop->set_disabled(true);
 		return;
 	}
-	anim_loop->set_disabled(false);
+	anim_loop->set_disabled(read_only);
 
 	SpriteFrames::LoopMode loop = frames->get_animation_loop_mode(edited_anim);
 	anim_loop->set_pressed_no_signal(loop != SpriteFrames::LOOP_NONE);
@@ -1649,7 +1649,7 @@ void SpriteFramesEditor::_update_anim_speed_spin() {
 		anim_speed->set_editable(false);
 		return;
 	}
-	anim_speed->set_editable(true);
+	anim_speed->set_editable(!read_only);
 
 	anim_speed->set_value_no_signal(frames->get_animation_speed(edited_anim));
 }

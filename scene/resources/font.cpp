@@ -1764,11 +1764,11 @@ Error FontFile::_load_bitmap_font(const String &p_path, List<String> *r_image_fi
 							}
 						}
 						int16_t offset = f->get_16();
-						if (kpk.x > 0x10FFFF) {
+						if (kpk.x < 0 || kpk.x > 0x10FFFF) {
 							WARN_PRINT(vformat("Invalid character code: \"%x\"", kpk.x));
 							continue;
 						}
-						if (kpk.y > 0x10FFFF) {
+						if (kpk.y < 0 || kpk.y > 0x10FFFF) {
 							WARN_PRINT(vformat("Invalid character code: \"%x\"", kpk.y));
 							continue;
 						}
@@ -1931,7 +1931,7 @@ Error FontFile::_load_bitmap_font(const String &p_path, List<String> *r_image_fi
 				if (keys.has("id")) {
 					page = keys["id"].to_int();
 				}
-				ERR_FAIL_COND_V_MSG(page >= page_count, ERR_CANT_CREATE, "Invalid BMFont page index.");
+				ERR_FAIL_INDEX_V_MSG(page, page_count, ERR_CANT_CREATE, "Invalid BMFont page index.");
 				if (keys.has("file")) {
 					String base_dir = p_path.get_base_dir();
 					String file = base_dir.path_join(keys["file"]);
@@ -2093,11 +2093,11 @@ Error FontFile::_load_bitmap_font(const String &p_path, List<String> *r_image_fi
 						kpk.y = 0x00;
 					}
 				}
-				if (kpk.x > 0x10FFFF) {
+				if (kpk.x < 0 || kpk.x > 0x10FFFF) {
 					WARN_PRINT(vformat("Invalid character code: \"%x\"", kpk.x));
 					continue;
 				}
-				if (kpk.y > 0x10FFFF) {
+				if (kpk.y < 0 || kpk.y > 0x10FFFF) {
 					WARN_PRINT(vformat("Invalid character code: \"%x\"", kpk.y));
 					continue;
 				}

@@ -32,9 +32,49 @@
 
 TEST_FORCE_LINK(test_os)
 
+#include "core/io/file_access.h"
 #include "core/os/os.h"
+#include "tests/test_utils.h"
 
 namespace TestOS {
+
+TEST_CASE("[OS] PE build ID ignores the PDB path") {
+	const String path = TestUtils::get_temp_path("codeview-build-id.exe");
+	auto build_id = [&](const String &p_pdb, uint32_t p_age) -> Vector<String> {
+		Ref<FileAccess> file = FileAccess::open(path, FileAccess::WRITE);
+		ERR_FAIL_COND_V(file.is_null(), Vector<String>());
+		file->store_16(0x5a4d);
+		file->seek(0x3c);
+		file->store_32(0x40);
+		file->store_32(0x00004550);
+		file->store_16(0x8664);
+		file->store_16(1); // Section count.
+		file->seek(0x58);
+		file->store_string(".buildid");
+		file->seek(0x68);
+		file->store_32(28); // Debug directory size.
+		file->store_32(0x80);
+		file->seek(0x8c);
+		file->store_32(2); // CodeView.
+		file->store_32(24 + p_pdb.utf8().length() + 1);
+		file->store_32(0);
+		file->store_32(0x9c);
+		file->store_string("RSDS");
+		for (int i = 0; i < 16; i++) {
+			file->store_8(i);
+		}
+		file->store_32(p_age);
+		file->store_string(p_pdb);
+		file->store_8(0);
+		file->close();
+		return OS::get_singleton()->get_debug_build_id(path);
+	};
+
+	const Vector<String> id = build_id("", 1);
+	REQUIRE(id.size() == 1);
+	CHECK(build_id("symbols/editor.pdb", 1) == id);
+	CHECK(build_id("symbols/editor.pdb", 2) != id);
+}
 
 TEST_CASE("[OS] Environment variables") {
 #ifdef WINDOWS_ENABLED

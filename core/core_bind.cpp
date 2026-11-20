@@ -1754,14 +1754,8 @@ Variant ClassDB::class_call_static(const Variant **p_arguments, int p_argcount, 
 	StringName class_ = *p_arguments[0];
 	StringName method = *p_arguments[1];
 	const MethodBind *bind = ::ClassDB::get_method(class_, method);
-	if (unlikely(!bind)) {
-		r_call_error.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
-		ERR_FAIL_V_MSG(Variant(), vformat("Nonexistent method '%s' in base '%s'.", method, class_));
-	}
-	if (unlikely(!bind->is_static())) {
-		r_call_error.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
-		ERR_FAIL_V_MSG(Variant(), vformat("Method '%s' in base '%s' is not static.", method, class_));
-	}
+	ERR_FAIL_NULL_V_MSG(bind, Variant(), vformat("Nonexistent method '%s' in base '%s'.", method, class_));
+	ERR_FAIL_COND_V_MSG(!bind->is_static(), Variant(), vformat("Method '%s' in base '%s' is not static.", method, class_));
 	return bind->call(nullptr, p_arguments + 2, p_argcount - 2, r_call_error);
 }
 

@@ -113,6 +113,8 @@
 #define HAVE_PPOLL 1
 
 #ifdef __linux__
+#define HAVE_CLOCK_GETTIME 1
+#define HAVE_PTHREAD_CONDATTR_SETCLOCK 1
 #define HAVE_INOTIFY 1
 #define HAVE_INOTIFY_INIT1 1
 // Don't add these defines, for some reason they mess with C#'s ability
