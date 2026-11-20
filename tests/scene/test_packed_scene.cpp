@@ -37,6 +37,31 @@ TEST_FORCE_LINK(test_packed_scene)
 
 namespace TestPackedScene {
 
+#ifdef TOOLS_ENABLED
+TEST_CASE("[PackedScene] Local resources are remapped for each inherited edit instance") {
+	Node *root = memnew(Node);
+	Ref<Resource> local;
+	local.instantiate();
+	local->set_local_to_scene(true);
+	root->set_meta("first", local);
+	root->set_meta("second", local);
+	PackedScene packed;
+	REQUIRE(packed.pack(root) == OK);
+	Node *first = packed.instantiate(PackedScene::GEN_EDIT_STATE_MAIN_INHERITED);
+	Node *second = packed.instantiate(PackedScene::GEN_EDIT_STATE_MAIN_INHERITED);
+	REQUIRE(first);
+	REQUIRE(second);
+	Ref<Resource> first_local = first->get_meta("first");
+	CHECK(first_local != local);
+	CHECK(first_local == Ref<Resource>(first->get_meta("second")));
+	CHECK(first_local != Ref<Resource>(second->get_meta("first")));
+	CHECK(first_local->get_local_scene() == first);
+	memdelete(second);
+	memdelete(first);
+	memdelete(root);
+}
+#endif
+
 TEST_CASE("[PackedScene] Pack Scene and Retrieve State") {
 	// Create a scene to pack.
 	Node *scene = memnew(Node);
