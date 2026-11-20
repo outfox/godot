@@ -3654,7 +3654,7 @@ RDD::ShaderID RenderingDeviceDriverWebGPU::shader_create_from_container(const Re
 
 	shader->has_override_declarations = detected_override_declarations;
 	if (detected_override_declarations) {
-		print_verbose(vformat("WebGPU: shader '%s' has override declarations — will use pipeline constants for specialization.", shader->name));
+		print_verbose(vformat("WebGPU: shader '%s' has override declarations - will use pipeline constants for specialization.", shader->name));
 	}
 
 	if (!error_text.is_empty()) {
