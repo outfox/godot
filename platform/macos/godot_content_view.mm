@@ -769,12 +769,8 @@
 			ke.pressed = false;
 		}
 	} else if (key == 0x38 || key == 0x3c) {
-		if (mod & NSEventModifierFlagShift) {
-			mod &= ~NSEventModifierFlagShift;
-			ke.pressed = true;
-		} else {
-			ke.pressed = false;
-		}
+		ke.pressed = ds->update_shift_pressed(key == 0x38, mod);
+		mod &= ~NSEventModifierFlagShift;
 	} else if (key == 0x3a || key == 0x3d) {
 		if (mod & NSEventModifierFlagOption) {
 			mod &= ~NSEventModifierFlagOption;

@@ -79,7 +79,7 @@ extern void godot_js_input_vibrate_handheld(int p_duration_ms);
 
 extern void godot_js_set_ime_active(int p_active);
 extern void godot_js_set_ime_position(int p_x, int p_y);
-extern void godot_js_set_ime_cb(void (*p_input)(int p_type, const char *p_text), void (*p_callback)(int p_type, int p_repeat, int p_modifiers), char r_code[32], char r_key[32]);
+extern void godot_js_set_ime_cb(void (*p_input)(int p_type, const char *p_text));
 extern int godot_js_is_ime_focused();
 
 // Input gamepad

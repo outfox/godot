@@ -107,6 +107,7 @@
 #import <IOKit/IOKitLib.h>
 #import <IOKit/hid/IOHIDKeys.h>
 #import <IOKit/hid/IOHIDLib.h>
+#import <IOKit/hidsystem/IOLLEvent.h>
 
 DisplayServerEnums::WindowID DisplayServerMacOS::_create_window(DisplayServerEnums::WindowMode p_mode, DisplayServerEnums::VSyncMode p_vsync_mode, const Rect2i &p_rect) {
 	const float scale = screen_get_max_scale();
@@ -707,9 +708,25 @@ void DisplayServerMacOS::send_window_event_by_id(DisplayServerEnums::WindowEvent
 
 void DisplayServerMacOS::release_pressed_events() {
 	_THREAD_SAFE_METHOD_
+	pressed_shift_sides = 0;
 	if (Input::get_singleton()) {
 		Input::get_singleton()->release_pressed_events();
 	}
+}
+
+bool DisplayServerMacOS::update_shift_pressed(bool p_left, unsigned int p_flags) {
+	_THREAD_SAFE_METHOD_
+	const unsigned int side = p_left ? NX_DEVICELSHIFTKEYMASK : NX_DEVICERSHIFTKEYMASK;
+	const unsigned int sides = p_flags & (NX_DEVICELSHIFTKEYMASK | NX_DEVICERSHIFTKEYMASK);
+	if (!(p_flags & NSEventModifierFlagShift)) {
+		pressed_shift_sides = 0;
+	} else if (sides) {
+		pressed_shift_sides = sides;
+	} else {
+		// Aggregate-only flagsChanged events still identify the key that changed.
+		pressed_shift_sides ^= side;
+	}
+	return (pressed_shift_sides & side) != 0;
 }
 
 void DisplayServerMacOS::sync_mouse_state() {
