@@ -102,6 +102,9 @@ Variant Path3DGizmo::get_handle_value(int p_id, bool p_secondary) const {
 }
 
 void Path3DGizmo::set_handle(int p_id, bool p_secondary, Camera3D *p_camera, const Point2 &p_point) {
+	if (Path3DEditorPlugin::singleton->get_edited_path() != path) {
+		return;
+	}
 	Ref<Curve3D> c = path->get_curve();
 	if (c.is_null()) {
 		return;
@@ -120,6 +123,7 @@ void Path3DGizmo::set_handle(int p_id, bool p_secondary, Camera3D *p_camera, con
 		const int idx = p_id;
 		if (!Path3DEditorPlugin::singleton->_edit.waiting_handle_physics || !Path3DEditorPlugin::singleton->_edit.in_physics_frame) {
 			Path3DEditorPlugin::singleton->_edit.waiting_handle_physics = true;
+			Path3DEditorPlugin::singleton->_edit.gizmo_id = get_instance_id();
 			Path3DEditorPlugin::singleton->_edit.gizmo_handle = p_id;
 			Path3DEditorPlugin::singleton->_edit.gizmo_handle_secondary = p_secondary;
 			Path3DEditorPlugin::singleton->_edit.gizmo_camera = p_camera;
@@ -781,21 +785,23 @@ EditorPlugin::AfterGUIInput Path3DEditorPlugin::forward_3d_gui_input(Camera3D *p
 }
 
 void Path3DEditorPlugin::update_handles() {
-	if (_edit.gizmo.is_valid()) {
-		callable_mp(_edit.gizmo.ptr(), &Path3DGizmo::redraw).call_deferred();
+	if (path) {
+		path->update_gizmos();
 	}
 }
 
 void Path3DEditorPlugin::edit(Object *p_object) {
-	if (path) {
-		path->disconnect("curve_changed", callable_mp(this, &Path3DEditorPlugin::_update_toolbar));
-		_edit.gizmo.unref();
-	}
-
-	path = Object::cast_to<Path3D>(p_object);
-
-	if (path) {
-		path->connect("curve_changed", callable_mp(this, &Path3DEditorPlugin::_update_toolbar));
+	Path3D *new_path = Object::cast_to<Path3D>(p_object);
+	if (new_path != path) {
+		if (path) {
+			path->disconnect("curve_changed", callable_mp(this, &Path3DEditorPlugin::_update_toolbar));
+		}
+		_edit = EditData();
+		handle_clicked = false;
+		path = new_path;
+		if (path) {
+			path->connect("curve_changed", callable_mp(this, &Path3DEditorPlugin::_update_toolbar));
+		}
 	}
 
 	_update_toolbar();
@@ -811,7 +817,9 @@ void Path3DEditorPlugin::make_visible(bool p_visible) {
 		topmenu_bar->show();
 	} else {
 		topmenu_bar->hide();
-		path = nullptr;
+		if (path) {
+			edit(nullptr);
+		}
 	}
 	set_physics_process(p_visible);
 }
@@ -988,19 +996,12 @@ void Path3DEditorPlugin::_notification(int p_what) {
 				}
 			}
 			if (_edit.waiting_handle_physics) {
-				_edit.in_physics_frame = true;
-
-				// Find gizmo reference.
-				Vector<Ref<Node3DGizmo>> gizmos = path->get_gizmos();
-				for (Ref<EditorNode3DGizmo> seg : gizmos) {
-					if (seg.is_valid()) {
-						_edit.gizmo = seg;
-						break;
-					}
+				Ref<Path3DGizmo> gizmo = ObjectDB::get_instance<Path3DGizmo>(_edit.gizmo_id);
+				if (gizmo.is_valid() && path && path->get_gizmos().has(gizmo)) {
+					_edit.in_physics_frame = true;
+					gizmo->set_handle(_edit.gizmo_handle, _edit.gizmo_handle_secondary, _edit.gizmo_camera, _edit.mouse_pos);
+					_edit.in_physics_frame = false;
 				}
-
-				_edit.gizmo->set_handle(_edit.gizmo_handle, _edit.gizmo_handle_secondary, _edit.gizmo_camera, _edit.mouse_pos);
-				_edit.in_physics_frame = false;
 				_edit.waiting_handle_physics = false;
 			}
 		}
