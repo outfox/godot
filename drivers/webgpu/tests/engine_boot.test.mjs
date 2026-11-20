@@ -8,6 +8,30 @@ const engineSource = readFileSync(new URL('../../../platform/web/js/engine/engin
 const featuresSource = readFileSync(new URL('../../../platform/web/js/engine/features.js', import.meta.url), 'utf8');
 const deviceSource = readFileSync(new URL('../../../platform/web/js/engine/webgpu_device.js', import.meta.url), 'utf8');
 
+test('surface resize measures the selected canvas after transfer', () => {
+    const library = {};
+    const game = { width: 320, height: 240 };
+    const other = { width: 64, height: 48 };
+    const heap = [];
+    const context = {
+        LibraryManager: { library }, autoAddDeps() {}, mergeInto: Object.assign,
+        GodotConfig: { canvas: game }, Module: {},
+        GodotRuntime: { setHeapValue: (index, value) => { heap[index] = value; } },
+        findCanvasEventTarget: selector => ({ '#embedded-game': game, '#preview': other })[selector],
+    };
+    vm.runInNewContext(readFileSync(new URL('../../../platform/web/js/libs/library_godot_display.js', import.meta.url), 'utf8'), context);
+    const size = library.godot_js_display_canvas_size_get;
+    assert.equal(size('#embedded-game', 0, 1), 1);
+    assert.deepEqual(heap, [320, 240]);
+    context.Module.godotWebGPUSize = { width: 800, height: 600 };
+    assert.equal(size('#embedded-game', 0, 1), 1);
+    assert.deepEqual(heap, [800, 600]);
+    assert.equal(size('#preview', 0, 1), 1);
+    assert.deepEqual(heap, [64, 48]);
+    assert.equal(size('#missing', 0, 1), 0);
+    assert.deepEqual(heap, [64, 48]);
+});
+
 function harness(gpu, unavailableReason = '', { webgl = true, defaultDriver = '', prepareWorker } = {}) {
     const modules = [];
     const calls = [];

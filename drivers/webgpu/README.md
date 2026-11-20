@@ -35,8 +35,8 @@ uv run scons -C <godot-checkout> platform=web target=template_debug library_type
 ```
 
 `webgpu_port=auto` uses the prepared Emdawnwebgpu port. Its legacy JavaScript
-uses the Emscripten 3.x stack dependency names; newer SDKs use the original
-JavaScript. Tint also retains a locale-independent float parser for older libc++.
+uses the Emscripten 3.x stack dependency names. Newer SDKs use the same threaded
+patches with modern stack names. Tint retains a locale-independent float parser for older libc++.
 An explicit local `.py` port or `webgpu_port=emdawnwebgpu` may be supplied for
 single-threaded builds on other toolchains. The remote port requires Emscripten 4.0.10 or later.
 
@@ -53,6 +53,7 @@ with the pinned SDK active. Open `http://localhost:8000/port.html` in a WebGPU
 browser and look for `THREADED_WEBGPU_PORT_PASSED` in its console.
 
 ```sh
+uv run --no-project python godot/drivers/webgpu/dependencies.py
 mkdir -p temp/threaded-port
 em++ godot/drivers/webgpu/tests/threaded_browser_port.cpp --use-port=godot/thirdparty/emdawnwebgpu/emdawnwebgpu.port.py -pthread -sPTHREAD_POOL_SIZE=2 -sWASM_BIGINT -sASSERTIONS=1 -O1 -o temp/threaded-port/port.html
 node .github/scripts/serve-isolated.mjs temp/threaded-port 8000

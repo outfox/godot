@@ -1,11 +1,20 @@
 --- a/thirdparty/emdawnwebgpu/webgpu/src/library_webgpu.js
 +++ b/thirdparty/emdawnwebgpu/webgpu/src/library_webgpu.js
-@@ -1981,7 +1981,7 @@ var LibraryWebGPU = {
+@@ -1970,4 +1970,4 @@
+-  wgpuInstanceCreateSurface__deps: ['$findCanvasEventTarget', 'emwgpuCreateSurface'],
++  wgpuInstanceCreateSurface__deps: ['$findCanvasEventTarget', '$UTF8ToString', 'emwgpuCreateSurface'],
+   wgpuInstanceCreateSurface: (instancePtr, descriptor) => {
+     {{{ gpu.makeCheck('descriptor') }}}
+     var nextInChainPtr = {{{ makeGetValue('descriptor', C_STRUCTS.WGPUSurfaceDescriptor.nextInChain, '*') }}};
+@@ -1981,7 +1981,10 @@ var LibraryWebGPU = {
      {{{ gpu.makeCheckDescriptor('sourceCanvasHTMLSelector') }}}
      var selectorPtr = {{{ makeGetValue('sourceCanvasHTMLSelector', C_STRUCTS.WGPUEmscriptenSurfaceSourceCanvasHTMLSelector.selector, '*') }}};
      {{{ gpu.makeCheck('selectorPtr') }}}
 -    var canvas = findCanvasEventTarget(selectorPtr);
-+    var canvas = Module['godotWebGPUCanvas'] || findCanvasEventTarget(selectorPtr);
++    var canvas = Module['godotWebGPUCanvas'];
++    if (!canvas || UTF8ToString(selectorPtr) !== Module['godotWebGPUCanvasSelector']) {
++      canvas = findCanvasEventTarget(selectorPtr);
++    }
  #if OFFSCREENCANVAS_SUPPORT
      if (canvas.offscreenCanvas) canvas = canvas.offscreenCanvas;
  #endif

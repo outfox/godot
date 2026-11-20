@@ -127,7 +127,7 @@ Godot['prepareWorkerWebGPU'] = async (module, canvas) => {
 	worker.addEventListener('error', workerFailed);
 	try {
 		const ready = reply();
-		worker.postMessage({ 'godotWebGPU': port2 }, [port2]);
+		worker.postMessage({ 'godotWebGPU': port2, 'canvasSelector': `#${canvas.id}` }, [port2]);
 		await Promise.race([ready, failed]);
 		const offscreen = canvas.transferControlToOffscreen();
 		module['godotWebGPUSize'] = { width: offscreen.width, height: offscreen.height };

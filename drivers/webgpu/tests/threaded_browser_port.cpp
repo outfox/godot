@@ -87,9 +87,17 @@ extern "C" EMSCRIPTEN_KEEPALIVE void start_probe() {
 
 int main() {
 	EM_ASM({
-		navigator.gpu.requestAdapter().then(adapter => adapter.requestDevice()).then(device => {
+		(async () => {
+			const adapter = await navigator.gpu?.requestAdapter();
+			if (!adapter) {
+				throw new Error("WebGPU adapter unavailable.");
+			}
+			const device = await adapter.requestDevice();
 			Module['preinitializedWebGPUDevice'] = device;
 			Module['_start_probe']();
+		})().catch(error => {
+			document.body.dataset.result = 'failed';
+			console.error('THREADED_WEBGPU_PORT_FAILED', error);
 		});
 	});
 }

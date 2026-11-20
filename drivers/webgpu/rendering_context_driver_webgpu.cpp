@@ -182,6 +182,7 @@ RenderingContextDriver::SurfaceID RenderingContextDriverWebGPU::surface_create(c
 
 	SurfaceID id = next_surface_id++;
 	Surface &surface = surfaces[id];
+	surface.canvas_selector = canvas_selector;
 	surface.handle = wgpu_surface;
 	surface.format = EM_ASM_INT({ return navigator.gpu.getPreferredCanvasFormat() === 'rgba8unorm'; }) ? WGPUTextureFormat_RGBA8Unorm : WGPUTextureFormat_BGRA8Unorm;
 	surface.width = 0;
@@ -198,9 +199,10 @@ void RenderingContextDriverWebGPU::surface_set_size(SurfaceID p_surface, uint32_
 #ifdef WEB_ENABLED
 	int canvas_width = 0;
 	int canvas_height = 0;
-	godot_js_display_window_size_get(&canvas_width, &canvas_height);
-	p_width = MAX(canvas_width, 0);
-	p_height = MAX(canvas_height, 0);
+	if (godot_js_display_canvas_size_get(surface.canvas_selector.utf8().get_data(), &canvas_width, &canvas_height)) {
+		p_width = MAX(canvas_width, 0);
+		p_height = MAX(canvas_height, 0);
+	}
 #endif
 	if (surface.width != p_width || surface.height != p_height) {
 		surface.width = p_width;

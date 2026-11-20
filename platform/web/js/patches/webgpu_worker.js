@@ -13,6 +13,7 @@ if (typeof DedicatedWorkerGlobalScope !== 'undefined' && self instanceof Dedicat
 						Module['_emwgpuSetDeviceThread']();
 						Module['preinitializedWebGPUDevice'] = device;
 						Module['godotWebGPUCanvas'] = canvas;
+						Module['godotWebGPUCanvasSelector'] = event.data['canvasSelector'];
 						port.postMessage(true);
 					} else {
 						device.destroy();

@@ -48,6 +48,9 @@ class RenderingContextDriverWebGPU : public RenderingContextDriver {
 	SurfaceID surface_create_native(const void *p_platform_data);
 
 	struct Surface {
+#ifdef WEB_ENABLED
+		String canvas_selector;
+#endif
 		WGPUSurface handle = nullptr;
 		uint32_t width = 0;
 		uint32_t height = 0;

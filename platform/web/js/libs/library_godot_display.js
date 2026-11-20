@@ -523,6 +523,20 @@ const GodotDisplay = {
 		GodotRuntime.setHeapValue(p_height, size.height, 'i32');
 	},
 
+	godot_js_display_canvas_size_get__proxy: 'sync',
+	godot_js_display_canvas_size_get__deps: ['$findCanvasEventTarget'],
+	godot_js_display_canvas_size_get__sig: 'iiii',
+	godot_js_display_canvas_size_get: function (p_selector, p_width, p_height) {
+		const canvas = findCanvasEventTarget(p_selector);
+		if (!canvas) {
+			return 0;
+		}
+		const size = (canvas === GodotConfig.canvas && Module['godotWebGPUSize']) || canvas;
+		GodotRuntime.setHeapValue(p_width, size.width, 'i32');
+		GodotRuntime.setHeapValue(p_height, size.height, 'i32');
+		return 1;
+	},
+
 	godot_js_display_has_webgl__proxy: 'sync',
 	godot_js_display_has_webgl__sig: 'ii',
 	godot_js_display_has_webgl: function (p_version) {
