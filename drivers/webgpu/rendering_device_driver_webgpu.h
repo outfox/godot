@@ -102,6 +102,24 @@ class RenderingDeviceDriverWebGPU : public RenderingDeviceDriver {
 	bool has_texture_compression_bc = false;
 	bool has_texture_compression_etc2 = false;
 	bool has_texture_compression_astc = false;
+	bool has_rg11b10_renderable = false;
+	bool has_depth32_stencil8 = false;
+
+	// Shader variants share identical layouts. On threaded web each creation is a synchronous round trip to the
+	// device thread, so ~800 variants cost seconds without this cache. The cache keeps one reference per layout.
+	struct LayoutKey {
+		LocalVector<uint64_t> words;
+		uint32_t hash() const { return hash_murmur3_buffer(words.ptr(), words.size() * sizeof(uint64_t)); }
+		bool operator==(const LayoutKey &p_other) const {
+			return words.size() == p_other.words.size() && memcmp(words.ptr(), p_other.words.ptr(), words.size() * sizeof(uint64_t)) == 0;
+		}
+	};
+	Mutex layout_cache_mutex;
+	HashMap<LayoutKey, WGPUBindGroupLayout> bind_group_layout_cache;
+	HashMap<LayoutKey, WGPUPipelineLayout> pipeline_layout_cache;
+	// Returns a new reference to a cached layout, like the wgpuDeviceCreate* functions.
+	WGPUBindGroupLayout _create_bind_group_layout(const WGPUBindGroupLayoutDescriptor &p_desc);
+	WGPUPipelineLayout _create_pipeline_layout(const WGPUPipelineLayoutDescriptor &p_desc);
 
 	RenderingShaderContainerFormatWebGPU *shader_container_format = nullptr;
 
