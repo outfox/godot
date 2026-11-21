@@ -177,6 +177,11 @@ public:
 
 	// Retrieve a pipeline. It'll return an empty pipeline if it's not available yet, but it'll be guaranteed to succeed if 'wait for compilation' is true and stall as necessary. Source is just an optional number to aid debugging.
 	RID get_pipeline(const Key &p_key, uint32_t p_key_hash, bool p_wait_for_compilation, RSE::PipelineSource p_source) {
+#ifdef WEB_ENABLED
+		// WebGPU on web creates pipelines on first bind, so waiting is cheap. Falling back to an ubershader instead would
+		// make the browser compile both it and, a frame later, the specialized pipeline.
+		p_wait_for_compilation = true;
+#endif
 		RBMap<uint32_t, RID>::Element *e = hash_map.find(p_key_hash);
 
 		if (e == nullptr) {
@@ -203,11 +208,7 @@ public:
 					return RID();
 				}
 			} else {
-				// Without worker threads (web) the task ran inline; using its result spares compiling the ubershader.
-				if (_add_new_pipelines_to_map()) {
-					e = hash_map.find(p_key_hash);
-				}
-				return e != nullptr ? e->value() : RID();
+				return RID();
 			}
 		} else {
 			return e->value();
