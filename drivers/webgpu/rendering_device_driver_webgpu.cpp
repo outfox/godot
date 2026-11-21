@@ -199,6 +199,12 @@ RenderingDeviceDriverWebGPU::RenderingDeviceDriverWebGPU(RenderingContextDriverW
 }
 
 RenderingDeviceDriverWebGPU::~RenderingDeviceDriverWebGPU() {
+	for (const KeyValue<LayoutKey, WGPUPipelineLayout> &kv : pipeline_layout_cache) {
+		wgpuPipelineLayoutRelease(kv.value);
+	}
+	for (const KeyValue<LayoutKey, WGPUBindGroupLayout> &kv : bind_group_layout_cache) {
+		wgpuBindGroupLayoutRelease(kv.value);
+	}
 	for (const KeyValue<ClearPipelineKey, WGPURenderPipeline> &kv : clear_pipelines) {
 		wgpuRenderPipelineRelease(kv.value);
 	}
@@ -726,6 +732,8 @@ void RenderingDeviceDriverWebGPU::_check_capabilities() {
 	has_texture_compression_bc = wgpuDeviceHasFeature(device, WGPUFeatureName_TextureCompressionBC);
 	has_texture_compression_etc2 = wgpuDeviceHasFeature(device, WGPUFeatureName_TextureCompressionETC2);
 	has_texture_compression_astc = wgpuDeviceHasFeature(device, WGPUFeatureName_TextureCompressionASTC);
+	has_rg11b10_renderable = wgpuDeviceHasFeature(device, WGPUFeatureName_RG11B10UfloatRenderable);
+	has_depth32_stencil8 = wgpuDeviceHasFeature(device, WGPUFeatureName_Depth32FloatStencil8);
 	if (has_texture_compression_bc) {
 		print_verbose("WebGPU: texture-compression-bc feature is available.");
 	}
@@ -1902,7 +1910,7 @@ bool RenderingDeviceDriverWebGPU::texture_is_format_supported_for_samples(DataFo
 		return true;
 	}
 	const WGPUTextureFormat format = _data_format_to_wgpu(p_format);
-	return wgpu_format_supports_multisampling(format, has_core_features, has_texture_formats_tier1, format == WGPUTextureFormat_RG11B10Ufloat && wgpuDeviceHasFeature(device, WGPUFeatureName_RG11B10UfloatRenderable));
+	return wgpu_format_supports_multisampling(format, has_core_features, has_texture_formats_tier1, format == WGPUTextureFormat_RG11B10Ufloat && has_rg11b10_renderable);
 }
 
 RDD::TextureSamples RenderingDeviceDriverWebGPU::texture_get_nearest_supported_samples(const TextureFormat &p_format) {
@@ -2013,7 +2021,7 @@ BitField<RDD::TextureUsageBits> RenderingDeviceDriverWebGPU::texture_get_usages_
 			break;
 	}
 
-	if (p_format == DATA_FORMAT_D32_SFLOAT_S8_UINT && !wgpuDeviceHasFeature(device, WGPUFeatureName_Depth32FloatStencil8)) {
+	if (p_format == DATA_FORMAT_D32_SFLOAT_S8_UINT && !has_depth32_stencil8) {
 		return 0;
 	}
 	if (is_depth_stencil) {
@@ -3450,6 +3458,47 @@ static bool _is_handle_uniform(RDD::UniformType p_type) {
 			p_type == RDD::UNIFORM_TYPE_INPUT_ATTACHMENT;
 }
 
+WGPUBindGroupLayout RenderingDeviceDriverWebGPU::_create_bind_group_layout(const WGPUBindGroupLayoutDescriptor &p_desc) {
+	LayoutKey key; // Every field except the (unused) chains and the label.
+	for (size_t i = 0; i < p_desc.entryCount; i++) {
+		const WGPUBindGroupLayoutEntry &e = p_desc.entries[i];
+		key.words.push_back(uint64_t(e.binding) | uint64_t(e.bindingArraySize) << 32);
+		key.words.push_back(e.visibility);
+		key.words.push_back(uint64_t(e.buffer.type) | uint64_t(e.buffer.hasDynamicOffset) << 32);
+		key.words.push_back(e.buffer.minBindingSize);
+		key.words.push_back(uint64_t(e.sampler.type) | uint64_t(e.texture.sampleType) << 32);
+		key.words.push_back(uint64_t(e.texture.viewDimension) | uint64_t(e.texture.multisampled) << 32);
+		key.words.push_back(uint64_t(e.storageTexture.access) | uint64_t(e.storageTexture.viewDimension) << 32);
+		key.words.push_back(e.storageTexture.format);
+	}
+	MutexLock lock(layout_cache_mutex);
+	WGPUBindGroupLayout *layout = bind_group_layout_cache.getptr(key);
+	if (!layout) {
+		WGPUBindGroupLayout created = wgpuDeviceCreateBindGroupLayout(device, &p_desc);
+		ERR_FAIL_NULL_V(created, nullptr);
+		layout = &bind_group_layout_cache.insert(key, created)->value;
+	}
+	wgpuBindGroupLayoutAddRef(*layout);
+	return *layout;
+}
+
+WGPUPipelineLayout RenderingDeviceDriverWebGPU::_create_pipeline_layout(const WGPUPipelineLayoutDescriptor &p_desc) {
+	// Group layouts are cached or persistent, so their handles identify them.
+	LayoutKey key;
+	for (size_t i = 0; i < p_desc.bindGroupLayoutCount; i++) {
+		key.words.push_back(uint64_t(uintptr_t(p_desc.bindGroupLayouts[i])));
+	}
+	MutexLock lock(layout_cache_mutex);
+	WGPUPipelineLayout *layout = pipeline_layout_cache.getptr(key);
+	if (!layout) {
+		WGPUPipelineLayout created = wgpuDeviceCreatePipelineLayout(device, &p_desc);
+		ERR_FAIL_NULL_V(created, nullptr);
+		layout = &pipeline_layout_cache.insert(key, created)->value;
+	}
+	wgpuPipelineLayoutAddRef(*layout);
+	return *layout;
+}
+
 RDD::ShaderID RenderingDeviceDriverWebGPU::shader_create_from_container(const Ref<RenderingShaderContainer> &p_shader_container, const Vector<ImmutableSampler> &p_immutable_samplers) {
 	ERR_FAIL_COND_V(p_shader_container.is_null(), ShaderID());
 
@@ -4028,7 +4077,7 @@ RDD::ShaderID RenderingDeviceDriverWebGPU::shader_create_from_container(const Re
 			CharString _bgl_label_cs = _bgl_label.utf8();
 			layout_desc.label = { _bgl_label_cs.get_data(), WGPU_STRLEN };
 
-			shader->bind_group_layouts[set] = wgpuDeviceCreateBindGroupLayout(device, &layout_desc);
+			shader->bind_group_layouts[set] = _create_bind_group_layout(layout_desc);
 			if (shader->bind_group_layouts[set] == nullptr) {
 				error_text = "WebGPU: wgpuDeviceCreateBindGroupLayout failed.";
 				goto cleanup;
@@ -4144,7 +4193,7 @@ RDD::ShaderID RenderingDeviceDriverWebGPU::shader_create_from_container(const Re
 					WGPUBindGroupLayoutDescriptor merged_desc = {};
 					merged_desc.entryCount = merged_entries.size();
 					merged_desc.entries = merged_entries.ptr();
-					shader->merged_pc_group_layout = wgpuDeviceCreateBindGroupLayout(device, &merged_desc);
+					shader->merged_pc_group_layout = _create_bind_group_layout(merged_desc);
 					if (!shader->merged_pc_group_layout) {
 						error_text = "WebGPU: failed to create merged PC+material bind group layout.";
 						goto cleanup;
@@ -4181,7 +4230,7 @@ RDD::ShaderID RenderingDeviceDriverWebGPU::shader_create_from_container(const Re
 		CharString _pl_label_cs = _pl_label.utf8();
 		pl_desc.label = { _pl_label_cs.get_data(), WGPU_STRLEN };
 
-		shader->pipeline_layout = wgpuDeviceCreatePipelineLayout(device, &pl_desc);
+		shader->pipeline_layout = _create_pipeline_layout(pl_desc);
 		if (shader->pipeline_layout == nullptr) {
 			error_text = "WebGPU: wgpuDeviceCreatePipelineLayout failed.";
 			goto cleanup;
