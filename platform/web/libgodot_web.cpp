@@ -18,6 +18,9 @@
 #include "core/string/print_string.h"
 #include "core/variant/variant.h"
 #include "main/main.h"
+#include "servers/rendering/rendering_server_globals.h"
+
+#include <emscripten/emscripten.h>
 
 #include <cstdlib>
 
@@ -134,5 +137,13 @@ extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
 	}
 #endif
 
-	return os->main_loop_iterate();
+	const uint64_t skipped_draws = RSG::pipeline_skipped_draws;
+	const bool exit = os->main_loop_iterate();
+
+	// 2dog: the page's loading screen stays over the first complete frames, which still stall on shader compilation.
+	static int reported_frames = 0;
+	if (reported_frames < 8 && skipped_draws == RSG::pipeline_skipped_draws) {
+		MAIN_THREAD_ASYNC_EM_ASM({ dispatchEvent(new CustomEvent('2dog:frame', { detail : $0 })); }, ++reported_frames);
+	}
+	return exit;
 }
