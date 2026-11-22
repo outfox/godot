@@ -432,7 +432,12 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 
 		if constexpr (p_pass_mode == PASS_MODE_COLOR) {
 			pipeline_specialization.use_light_soft_shadows = element_info.uses_softshadow;
+#ifdef WEB_ENABLED
+			// Always on: a new variant of every lit pipeline would stall the browser when a projector first lights up.
+			pipeline_specialization.use_light_projector = true;
+#else
 			pipeline_specialization.use_light_projector = element_info.uses_projector;
+#endif
 			pipeline_specialization.use_directional_soft_shadows = p_params->use_directional_soft_shadow;
 		}
 

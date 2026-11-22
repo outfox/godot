@@ -2513,7 +2513,12 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 			mesh_surface = surf->surface_shadow;
 
 		} else {
+#ifdef WEB_ENABLED
+			// Always on: a new variant of every lit pipeline would stall the browser when a projector first lights up.
+			pipeline_specialization.use_light_projector = true;
+#else
 			pipeline_specialization.use_light_projector = inst->use_projector;
+#endif
 			pipeline_specialization.use_light_soft_shadows = inst->use_soft_shadow;
 			pipeline_specialization.omni_lights = SceneShaderForwardMobile::shader_count_for(inst->omni_light_count);
 			pipeline_specialization.spot_lights = SceneShaderForwardMobile::shader_count_for(inst->spot_light_count);
