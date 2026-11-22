@@ -806,6 +806,7 @@ void RendererViewport::draw_viewports(bool p_swap_buffers) {
 	HashMap<DisplayServerEnums::WindowID, Vector<RenderingServerTypes::BlitToScreen>> blit_to_screen_list;
 	//draw viewports
 	RENDER_TIMESTAMP("> Render Viewports");
+	const uint64_t skipped_draws = RSG::pipeline_skipped_draws;
 
 	GodotProfileZoneGrouped(_profile_zone, "render viewports");
 
@@ -870,6 +871,7 @@ void RendererViewport::draw_viewports(bool p_swap_buffers) {
 		}
 
 		RENDER_TIMESTAMP("> Render Viewport " + itos(i));
+		const uint64_t viewport_skipped_draws = RSG::pipeline_skipped_draws;
 
 		RSG::texture_storage->render_target_set_as_unused(vp->render_target);
 #ifndef XR_DISABLED
@@ -952,7 +954,7 @@ void RendererViewport::draw_viewports(bool p_swap_buffers) {
 			}
 		}
 
-		if (vp->update_mode == RSE::VIEWPORT_UPDATE_ONCE) {
+		if (vp->update_mode == RSE::VIEWPORT_UPDATE_ONCE && viewport_skipped_draws == RSG::pipeline_skipped_draws) {
 			vp->update_mode = RSE::VIEWPORT_UPDATE_DISABLED;
 		}
 
@@ -977,7 +979,8 @@ void RendererViewport::draw_viewports(bool p_swap_buffers) {
 	RENDER_TIMESTAMP("< Render Viewports");
 
 	GodotProfileZoneGrouped(_profile_zone, "rasterizer->blit_render_targets_to_screen");
-	if (p_swap_buffers && !blit_to_screen_list.is_empty()) {
+	// A frame that had draws skipped (web, pipelines still compiling) isn't shown; the previous one stays on screen.
+	if (p_swap_buffers && !blit_to_screen_list.is_empty() && skipped_draws == RSG::pipeline_skipped_draws) {
 		for (const KeyValue<int, Vector<RenderingServerTypes::BlitToScreen>> &E : blit_to_screen_list) {
 			RSG::rasterizer->blit_render_targets_to_screen(E.key, E.value.ptr(), E.value.size());
 		}

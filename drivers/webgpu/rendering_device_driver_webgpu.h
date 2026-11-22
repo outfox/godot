@@ -237,7 +237,18 @@ class RenderingDeviceDriverWebGPU : public RenderingDeviceDriver {
 	WGPUShaderModule _create_module_with_spec_constants(const PackedByteArray &p_spirv, VectorView<PipelineSpecializationConstant> p_constants, ShaderStage p_stage, const WGShader *p_shader);
 	PipelineID _render_pipeline_create_now(ShaderID p_shader, VertexFormatID p_vertex_format, RenderPrimitive p_render_primitive, PipelineRasterizationState p_rasterization_state, PipelineMultisampleState p_multisample_state, PipelineDepthStencilState p_depth_stencil_state, PipelineColorBlendState p_blend_state, VectorView<int32_t> p_color_attachments, BitField<PipelineDynamicStateFlags> p_dynamic_state, RenderPassID p_render_pass, uint32_t p_render_subpass, VectorView<PipelineSpecializationConstant> p_specialization_constants);
 	PipelineID _compute_pipeline_create_now(ShaderID p_shader, VectorView<PipelineSpecializationConstant> p_specialization_constants);
-	void _create_deferred_pipeline(WGPipelineWrapper *p_pw);
+	void _create_deferred_pipeline(WGPipelineWrapper *p_pw, WGPrewarm *p_prewarm = nullptr);
+#ifdef WEB_ENABLED
+	// Chrome compiles synchronous creations one by one but async ones in parallel, so every deferred render pipeline is
+	// also requested asynchronously as early as possible. Pipelines created off the device thread wait in the queue.
+	// Compute pipelines aren't: Godot creates one per effect variant at startup and binds few of them.
+	LocalVector<WGPipelineWrapper *> prewarm_queue;
+	WGPrewarm *prewarm_request = nullptr; // Set while _create_deferred_pipeline issues async creations.
+	void _queue_prewarm(WGPipelineWrapper *p_pw);
+	void _drain_prewarm();
+	void _prewarm_pipeline(WGPipelineWrapper *p_pw);
+	void _release_prewarm(WGPipelineWrapper *p_pw);
+#endif
 
 	// Bindings rewritten by _postprocess_wgsl that the bind group layouts must mirror.
 	struct WGSLRewrites {

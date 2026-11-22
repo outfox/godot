@@ -607,6 +607,7 @@ public:
 
 			static const Vector3i DIRTY_ALL;
 			Vector3i dirty_regions; //(0,0,0 is not dirty, negative is refresh from the end, DIRTY_ALL is refresh all.
+			bool redraw = false; // A region was rendered with draws skipped (web), so the cascade is rendered again.
 
 			RID sdf_store_uniform_set;
 			RID sdf_direct_light_static_uniform_set;
