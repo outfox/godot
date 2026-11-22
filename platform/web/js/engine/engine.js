@@ -437,6 +437,9 @@ const Engine = (function () {
 	SafeEngine['isAudioWorkletAvailable'] = Features.isAudioWorkletAvailable;
 	SafeEngine['getMissingFeatures'] = Features.getMissingFeatures;
 
+	// 2dog: this engine dispatches a '2dog:frame' event on the window for each of its first complete frames.
+	SafeEngine['reportsFrames'] = true;
+
 	return SafeEngine;
 }());
 if (typeof window !== 'undefined') {
