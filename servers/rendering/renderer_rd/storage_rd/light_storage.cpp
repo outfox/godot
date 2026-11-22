@@ -2885,7 +2885,8 @@ LightStorage::ShadowCubemap *LightStorage::_get_shadow_cubemap(int p_size) {
 			tf.format = get_cubemap_depth_format();
 			tf.width = p_size;
 			tf.height = p_size;
-			tf.texture_type = RD::TEXTURE_TYPE_CUBE;
+			// WebGPU can't filter a depth cube, so its cube_to_dp shader loads texels from a six-layer array instead.
+			tf.texture_type = RD::get_singleton()->get_device_api_name() == "WebGPU" ? RD::TEXTURE_TYPE_2D_ARRAY : RD::TEXTURE_TYPE_CUBE;
 			tf.array_layers = 6;
 			tf.usage_bits = get_cubemap_depth_usage_bits();
 			sc.cubemap = RD::get_singleton()->texture_create(tf, RD::TextureView());
