@@ -5738,8 +5738,8 @@ void RenderingDeviceDriverWebGPU::_flush_push_constants(WGCommandBuffer *p_cmd_b
 }
 
 // Re-opens the pass that a new push constant page ended, with all bound state.
-// shortcut: attachments the original pass stored with Discard (e.g. MSAA colour) lose the draws
-// before the page switch; only hit beyond PUSH_CONSTANT_RING_SIZE of push constants per frame.
+// shortcut: attachments the original pass stored with Discard (e.g. MSAA depth) lose the draws before the
+// page switch. Only a pass with over half a ring of push constants can hit that; upgrade if one does.
 void RenderingDeviceDriverWebGPU::_restart_pass_after_push_constant_page(WGCommandBuffer *p_cmd_buf, bool p_compute) {
 	if (p_compute) {
 		// Restart compute pass and rebind state.
@@ -6035,13 +6035,11 @@ void RenderingDeviceDriverWebGPU::command_begin_render_pass(CommandBufferID p_cm
 				return WGPULoadOp_Clear; // DONT_CARE → Clear (WebGPU has no DONT_CARE; Clear is safest)
 		}
 	};
-	auto map_store_op = [](AttachmentStoreOp op) -> WGPUStoreOp {
-		switch (op) {
-			case ATTACHMENT_STORE_OP_STORE:
-				return WGPUStoreOp_Store;
-			default:
-				return WGPUStoreOp_Discard; // DONT_CARE
-		}
+	// A pass that fills the push constant ring is ended and re-opened, and then loads its attachments again.
+	// So a pass that begins in the second half of the ring discards nothing.
+	const bool may_restart = push_constant_ring_offset > PUSH_CONSTANT_RING_SIZE / 2;
+	auto map_store_op = [may_restart](AttachmentStoreOp op) -> WGPUStoreOp {
+		return op == ATTACHMENT_STORE_OP_STORE || may_restart ? WGPUStoreOp_Store : WGPUStoreOp_Discard;
 	};
 
 	// --- Build color attachments ---
