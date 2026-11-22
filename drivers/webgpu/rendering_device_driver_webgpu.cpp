@@ -46,6 +46,9 @@
 #ifdef WEB_ENABLED
 #include "webgpu_device_thread.h"
 #include <emscripten/emscripten.h>
+
+// Guards the prewarm queue and every WGPrewarm: results arrive on the device thread, which may not be rendering.
+static Mutex prewarm_mutex;
 #endif
 #include <cstdio>
 #include <cstdlib>
@@ -5638,6 +5641,13 @@ void RenderingDeviceDriverWebGPU::pipeline_free(PipelineID p_pipeline) {
 	if (pw->deferred) {
 		memdelete(pw->deferred);
 	}
+#ifdef WEB_ENABLED
+	{
+		MutexLock lock(prewarm_mutex);
+		prewarm_queue.erase(pw);
+	}
+	_release_prewarm(pw);
+#endif
 	if (pw->type == WGPipelineWrapper::RENDER && pw->render_handle) {
 		wgpuRenderPipelineRelease(pw->render_handle);
 		if (pw->render_handle_u16) {
@@ -7258,6 +7268,7 @@ RDD::PipelineID RenderingDeviceDriverWebGPU::render_pipeline_create(
 		d->specialization_constants.push_back(p_specialization_constants[i]);
 	}
 	pw->deferred = d;
+	_queue_prewarm(pw);
 	return PipelineID(pw);
 #else
 	return _render_pipeline_create_now(p_shader, p_vertex_format, p_render_primitive, p_rasterization_state, p_multisample_state,
@@ -7265,16 +7276,118 @@ RDD::PipelineID RenderingDeviceDriverWebGPU::render_pipeline_create(
 #endif
 }
 
-void RenderingDeviceDriverWebGPU::_create_deferred_pipeline(WGPipelineWrapper *p_pw) {
+#ifdef WEB_ENABLED
+
+static void _prewarm_arrived(WGPUCreatePipelineAsyncStatus, WGPURenderPipeline p_pipeline, WGPUStringView, void *p_userdata, void *) {
+	WGPrewarm *prewarm = (WGPrewarm *)p_userdata;
+	{
+		MutexLock lock(prewarm_mutex);
+		prewarm->pending--;
+		if (!prewarm->abandoned) {
+			prewarm->results[prewarm->results[0] ? 1 : 0] = p_pipeline;
+			return;
+		}
+		if (prewarm->pending == 0) {
+			memdelete(prewarm);
+		}
+	}
+	if (p_pipeline) {
+		wgpuRenderPipelineRelease(p_pipeline);
+	}
+}
+
+void RenderingDeviceDriverWebGPU::_queue_prewarm(WGPipelineWrapper *p_pw) {
+#ifdef THREADS_ENABLED
+	if (pthread_self() != emwgpuGetDeviceThread()) {
+		MutexLock lock(prewarm_mutex);
+		prewarm_queue.push_back(p_pw);
+		return;
+	}
+#endif
+	_prewarm_pipeline(p_pw);
+}
+
+void RenderingDeviceDriverWebGPU::_drain_prewarm() {
+	LocalVector<WGPipelineWrapper *> queued;
+	{
+		MutexLock lock(prewarm_mutex);
+		queued = prewarm_queue;
+		prewarm_queue.clear();
+	}
+	for (WGPipelineWrapper *pw : queued) {
+		_prewarm_pipeline(pw);
+	}
+}
+
+void RenderingDeviceDriverWebGPU::_prewarm_pipeline(WGPipelineWrapper *p_pw) {
+#ifdef THREADS_ENABLED
+	if (pthread_self() != emwgpuGetDeviceThread()) {
+		// Async creation isn't proxied to the device thread like the other WebGPU calls.
+		webgpu_on_device_thread([&] { _prewarm_pipeline(p_pw); });
+		return;
+	}
+#endif
+	const WGDeferredPipeline *d = p_pw->deferred;
+	// Without override constants each creation makes its own shader modules, so the browser couldn't match the two.
+	if (!d || p_pw->prewarm || (!p_pw->shader->has_override_declarations && !d->specialization_constants.is_empty())) {
+		return;
+	}
+	p_pw->prewarm = memnew(WGPrewarm);
+	_create_deferred_pipeline(p_pw, p_pw->prewarm);
+}
+
+void RenderingDeviceDriverWebGPU::_release_prewarm(WGPipelineWrapper *p_pw) {
+	WGPrewarm *prewarm = p_pw->prewarm;
+	if (!prewarm) {
+		return;
+	}
+	p_pw->prewarm = nullptr;
+	WGPrewarm results;
+	{
+		MutexLock lock(prewarm_mutex);
+		results = *prewarm;
+		if (prewarm->pending) {
+			prewarm->abandoned = true;
+		} else {
+			memdelete(prewarm);
+		}
+	}
+	for (WGPURenderPipeline pipeline : results.results) {
+		if (pipeline) {
+			wgpuRenderPipelineRelease(pipeline);
+		}
+	}
+}
+#endif
+
+void RenderingDeviceDriverWebGPU::_create_deferred_pipeline(WGPipelineWrapper *p_pw, WGPrewarm *p_prewarm) {
 	WGDeferredPipeline *d = p_pw->deferred;
+#ifdef WEB_ENABLED
+	if (!p_prewarm) {
+		// Everything queued goes to the browser first, so it compiles in parallel with this pipeline.
+		p_pw->deferred = nullptr;
+		_drain_prewarm();
+	}
+	prewarm_request = p_prewarm;
+#else
 	p_pw->deferred = nullptr;
+#endif
 	ShaderID shader(p_pw->shader);
 	PipelineID built = p_pw->type == WGPipelineWrapper::COMPUTE
 			? _compute_pipeline_create_now(shader, d->specialization_constants)
 			: _render_pipeline_create_now(shader, d->vertex_format, d->render_primitive, d->rasterization_state, d->multisample_state,
 					  d->depth_stencil_state, d->blend_state, d->color_attachments, d->dynamic_state, d->render_pass, d->render_subpass,
 					  d->specialization_constants);
+#ifdef WEB_ENABLED
+	prewarm_request = nullptr;
+	if (p_prewarm) {
+		return; // The creation arguments stay for the synchronous creation on first bind.
+	}
+#endif
 	memdelete(d);
+#ifdef WEB_ENABLED
+	_release_prewarm(p_pw);
+#endif
 	if (built.id) {
 		WGPipelineWrapper *b = (WGPipelineWrapper *)(built.id);
 		*p_pw = *b;
@@ -7761,6 +7874,21 @@ RDD::PipelineID RenderingDeviceDriverWebGPU::_render_pipeline_create_now(
 	CharString _pipeline_label_cs = _pipeline_label_str.utf8();
 	desc.label = { _pipeline_label_cs.get_data(), WGPU_STRLEN };
 
+#ifdef WEB_ENABLED
+	if (prewarm_request) {
+		WGPUCreateRenderPipelineAsyncCallbackInfo info = {};
+		info.mode = WGPUCallbackMode_AllowSpontaneous;
+		info.callback = _prewarm_arrived;
+		info.userdata1 = prewarm_request;
+		// Strips also get their Uint16 variant, like below.
+		for (int i = 0; i < (is_strip ? 2 : 1); i++) {
+			prewarm_request->pending++;
+			wgpuDeviceCreateRenderPipelineAsync(device, &desc, info);
+			desc.primitive.stripIndexFormat = WGPUIndexFormat_Uint16;
+		}
+		return PipelineID();
+	}
+#endif
 	WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(device, &desc);
 	if (!pipeline) {
 		if (specialized_vertex) {
@@ -8092,6 +8220,9 @@ void RenderingDeviceDriverWebGPU::command_insert_breadcrumb(CommandBufferID p_cm
 void RenderingDeviceDriverWebGPU::begin_segment(uint32_t p_frame_index, uint32_t p_frames_drawn) {
 	frame_index = p_frame_index;
 	frames_drawn = p_frames_drawn;
+#ifdef WEB_ENABLED
+	_drain_prewarm();
+#endif
 
 #if defined(WEBGPU_VERBOSE) && defined(WEB_ENABLED)
 	// Performance counters, logged once per second.

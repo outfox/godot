@@ -1267,6 +1267,11 @@ void GI::SDFGI::update(RID p_env, const Vector3 &p_world_position) {
 				cascade.dirty_regions = SDFGI::Cascade::DIRTY_ALL;
 			}
 		}
+
+		if (cascade.redraw) {
+			cascade.redraw = false;
+			cascade.dirty_regions = SDFGI::Cascade::DIRTY_ALL;
+		}
 	}
 }
 
@@ -2107,7 +2112,9 @@ void GI::SDFGI::render_region(Ref<RenderSceneBuffersRD> p_render_buffers, int p_
 	}
 
 	//print_line("rendering cascade " + itos(p_region) + " objects: " + itos(p_cull_count) + " bounds: " + bounds + " from: " + from + " size: " + size + " cell size: " + rtos(cascades[cascade].cell_size));
+	const uint64_t skipped_draws = RSG::pipeline_skipped_draws;
 	RendererSceneRenderRD::get_singleton()->_render_sdfgi(p_render_buffers, from, size, bounds, p_instances, render_albedo, render_emission, render_emission_aniso, render_geom_facing, p_exposure_normalization);
+	cascades[cascade].redraw |= skipped_draws != RSG::pipeline_skipped_draws;
 
 	if (cascade_next != cascade) {
 		RD::get_singleton()->draw_command_begin_label("SDFGI Pre-Process Cascade");

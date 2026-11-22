@@ -239,6 +239,14 @@ struct WGFramebuffer {
 // Pipeline
 // =============================================================================
 
+// Async creations of a render pipeline that hasn't been bound yet (web only). The results are only kept alive:
+// creating the same pipeline synchronously on first bind then costs the browser nothing.
+struct WGPrewarm {
+	WGPURenderPipeline results[2] = {}; // Strips have a second, Uint16 variant.
+	uint32_t pending = 0;
+	bool abandoned = false; // The pipeline was created or freed; later results are released on arrival.
+};
+
 struct WGPipelineWrapper {
 	enum Type { RENDER,
 		COMPUTE };
@@ -262,6 +270,7 @@ struct WGPipelineWrapper {
 	bool is_strip = false;
 	// Creation arguments of a pipeline that is created on first bind (web only).
 	struct WGDeferredPipeline *deferred = nullptr;
+	WGPrewarm *prewarm = nullptr;
 
 	WGPipelineWrapper() : render_handle(nullptr) {}
 };

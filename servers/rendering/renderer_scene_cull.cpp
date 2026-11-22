@@ -3500,6 +3500,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	//render shadows
 
 	max_shadows_used = 0;
+	LocalVector<InstanceLightData *> redrawn_lights;
 
 	if (p_using_shadows) { //setup shadow maps
 
@@ -3659,6 +3660,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 			if (redraw && max_shadows_used < MAX_UPDATE_SHADOWS) {
 				//must redraw!
+				redrawn_lights.push_back(light);
 				RENDER_TIMESTAMP("> Render Light3D " + itos(i));
 				if (_light_instance_update_shadow(ins, p_camera_data->main_transform, p_camera_data->main_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect, p_shadow_atlas, scenario, p_screen_mesh_lod_threshold, p_visible_layers)) {
 					light->make_shadow_dirty();
@@ -3731,7 +3733,15 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	}
 
 	RENDER_TIMESTAMP("Render 3D Scene");
+	const uint64_t skipped_draws = RSG::pipeline_skipped_draws;
 	scene_render->render_scene(p_render_buffers, p_camera_data, prev_camera_data, scene_cull_result.geometry_instances, scene_cull_result.light_instances, scene_cull_result.reflections, scene_cull_result.voxel_gi_instances, scene_cull_result.decals, scene_cull_result.lightmaps, scene_cull_result.fog_volumes, p_environment, camera_attributes, p_compositor, p_shadow_atlas, occluders_tex, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass, p_screen_mesh_lod_threshold, render_shadow_data, max_shadows_used, render_sdfgi_data, cull.sdfgi.region_count, p_window_output_max_value, &sdfgi_update_data, r_render_info);
+
+	if (skipped_draws != RSG::pipeline_skipped_draws) {
+		// Some casters may be missing from the shadows drawn above; draw them again next frame.
+		for (InstanceLightData *light : redrawn_lights) {
+			light->make_shadow_dirty();
+		}
+	}
 
 	if (p_viewport.is_valid()) {
 		RSG::viewport->viewport_set_prev_camera_data(p_viewport, p_camera_data);
@@ -3899,10 +3909,12 @@ void RendererSceneCull::render_probes() {
 						break;
 					}
 
+					const uint64_t skipped_draws = RSG::pipeline_skipped_draws;
 					bool done = _render_reflection_probe_step(ref_probe->self()->owner, ref_probe->self()->render_step);
 					if (done) {
 						done_list.push_back(ref_probe);
-					} else {
+					} else if (skipped_draws == RSG::pipeline_skipped_draws) {
+						// Otherwise the step is repeated, as it would capture a scene with draws missing.
 						ref_probe->self()->render_step++;
 					}
 
