@@ -239,11 +239,11 @@ class RenderingDeviceDriverWebGPU : public RenderingDeviceDriver {
 	PipelineID _compute_pipeline_create_now(ShaderID p_shader, VectorView<PipelineSpecializationConstant> p_specialization_constants);
 	void _create_deferred_pipeline(WGPipelineWrapper *p_pw, WGPrewarm *p_prewarm = nullptr);
 #ifdef WEB_ENABLED
-	// Chrome compiles synchronous creations one by one but async ones in parallel, so every deferred render pipeline is
-	// also requested asynchronously as early as possible. Pipelines created off the device thread wait in the queue.
-	// Compute pipelines aren't: Godot creates one per effect variant at startup and binds few of them.
+	// Browser compilers handle async pipeline creation off the render path, so deferred render pipelines are
+	// requested asynchronously in a bounded window and adopted directly on first bind.
 	LocalVector<WGPipelineWrapper *> prewarm_queue;
 	WGPrewarm *prewarm_request = nullptr; // Set while _create_deferred_pipeline issues async creations.
+	static void _prewarm_render_arrived(WGPUCreatePipelineAsyncStatus p_status, WGPURenderPipeline p_pipeline, WGPUStringView p_message, void *p_userdata1, void *p_userdata2);
 	void _queue_prewarm(WGPipelineWrapper *p_pw);
 	void _drain_prewarm();
 	void _prewarm_pipeline(WGPipelineWrapper *p_pw);
@@ -296,8 +296,8 @@ public:
 	virtual uint8_t *buffer_persistent_map_advance(BufferID p_buffer, uint64_t p_frames_drawn) override final;
 	/// Return dynamic offsets for buffers. Stub — returns 0.
 	virtual uint64_t buffer_get_dynamic_offsets(Span<BufferID> p_buffers) override final;
-	/// Flush a buffer's shadow CPU data to the GPU via wgpuQueueWriteBuffer.
-	virtual void buffer_flush(BufferID p_buffer) override final;
+	/// Flush a buffer's shadow CPU data (or a byte sub-range) to the GPU via wgpuQueueWriteBuffer.
+	virtual void buffer_flush(BufferID p_buffer, uint64_t p_offset = 0, uint64_t p_size = 0) override final;
 	/// Direct queue write bypassing staging buffers (for skeleton/bone updates).
 	virtual void buffer_write_direct(BufferID p_buffer, uint64_t p_offset, uint64_t p_size, const void *p_data) override final;
 	/// WebGPU: initiate async buffer map so it completes by next frame.
@@ -539,6 +539,8 @@ public:
 
 	/// Release a render or compute pipeline.
 	virtual void pipeline_free(PipelineID p_pipeline) override final;
+	virtual bool pipeline_is_ready(PipelineID p_pipeline) override final;
+	virtual bool has_pending_pipelines() override final;
 	/// Write push constant data. Emulated via a ring buffer (WebGPU has no push constants).
 	virtual void command_bind_push_constants(CommandBufferID p_cmd_buffer, ShaderID p_shader, uint32_t p_first_index, VectorView<uint32_t> p_data) override final;
 	/// Stub — WebGPU has no pipeline cache. Returns true.

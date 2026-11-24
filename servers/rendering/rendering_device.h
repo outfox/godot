@@ -275,7 +275,7 @@ public:
 	Error buffer_get_data_async(RID p_buffer, const Callable &p_callback, uint32_t p_offset = 0, uint32_t p_size = 0);
 	uint64_t buffer_get_device_address(RID p_buffer);
 	uint8_t *buffer_persistent_map_advance(RID p_buffer);
-	void buffer_flush(RID p_buffer);
+	void buffer_flush(RID p_buffer, uint64_t p_offset = 0, uint64_t p_size = 0);
 
 private:
 	/******************/
@@ -1300,6 +1300,8 @@ private:
 public:
 	RID render_pipeline_create(RID p_shader, FramebufferFormatID p_framebuffer_format, VertexFormatID p_vertex_format, RenderPrimitive p_render_primitive, const PipelineRasterizationState &p_rasterization_state, const PipelineMultisampleState &p_multisample_state, const PipelineDepthStencilState &p_depth_stencil_state, const PipelineColorBlendState &p_blend_state, BitField<PipelineDynamicStateFlags> p_dynamic_state_flags = 0, uint32_t p_for_render_pass = 0, const Vector<PipelineSpecializationConstant> &p_specialization_constants = Vector<PipelineSpecializationConstant>());
 	bool render_pipeline_is_valid(RID p_pipeline);
+	bool render_pipeline_is_ready(RID p_pipeline);
+	bool has_pending_pipelines();
 
 	RID compute_pipeline_create(RID p_shader, const Vector<PipelineSpecializationConstant> &p_specialization_constants = Vector<PipelineSpecializationConstant>());
 	bool compute_pipeline_is_valid(RID p_pipeline);
