@@ -48,6 +48,10 @@
 
 // Guards the prewarm queue and every WGPrewarm: results arrive on the device thread, which may not be rendering.
 static Mutex prewarm_mutex;
+static uint32_t pending_async_prewarms = 0;
+static RenderingDeviceDriverWebGPU *active_prewarm_driver = nullptr;
+// Cap concurrent async pipeline compiles to avoid exhausting browser GPU-process compiler memory (Firefox DXC).
+static constexpr uint32_t MAX_INFLIGHT_PREWARMS = 4;
 #endif
 #include <cstdio>
 #include <cstdlib>
@@ -199,9 +203,26 @@ static bool _reads_depth(WGPUTextureSampleType p_sample_type, WGPUTextureFormat 
 
 RenderingDeviceDriverWebGPU::RenderingDeviceDriverWebGPU(RenderingContextDriverWebGPU *p_context_driver) {
 	context_driver = p_context_driver;
+#ifdef WEB_ENABLED
+	{
+		MutexLock lock(prewarm_mutex);
+		active_prewarm_driver = this;
+		pending_async_prewarms = 0;
+	}
+#endif
 }
 
 RenderingDeviceDriverWebGPU::~RenderingDeviceDriverWebGPU() {
+#ifdef WEB_ENABLED
+	{
+		MutexLock lock(prewarm_mutex);
+		if (active_prewarm_driver == this) {
+			active_prewarm_driver = nullptr;
+		}
+		prewarm_queue.clear();
+		pending_async_prewarms = 0;
+	}
+#endif
 	for (const KeyValue<LayoutKey, WGPUPipelineLayout> &kv : pipeline_layout_cache) {
 		wgpuPipelineLayoutRelease(kv.value);
 	}
@@ -1072,21 +1093,40 @@ uint64_t RenderingDeviceDriverWebGPU::buffer_get_dynamic_offsets(Span<BufferID> 
 	return mask;
 }
 
-void RenderingDeviceDriverWebGPU::buffer_flush(BufferID p_buffer) {
+void RenderingDeviceDriverWebGPU::buffer_flush(BufferID p_buffer, uint64_t p_offset, uint64_t p_size) {
 	WGBuffer *buf = (WGBuffer *)(p_buffer.id);
-	if (buf && buf->shadow_map) {
-		// Flush only the dirty range if one was set (e.g., by
-		// buffer_persistent_map_advance), otherwise fall back to full buffer.
-		uint64_t flush_offset = 0;
-		uint64_t flush_size = buf->size;
-		if (buf->dirty_end > buf->dirty_offset) {
-			flush_offset = buf->dirty_offset;
-			flush_size = buf->dirty_end - buf->dirty_offset;
-		}
-		wgpuQueueWriteBuffer(queue, buf->handle, flush_offset, buf->shadow_map + flush_offset, flush_size);
-		buf->dirty_offset = 0;
-		buf->dirty_end = 0;
+	if (!buf || !buf->shadow_map) {
+		return;
 	}
+	uint64_t base_offset = 0;
+	uint64_t max_size = buf->size;
+	if (buf->is_dynamic() && buf->per_frame_size > 0 && frame_count > 1) {
+		base_offset = (uint64_t)buf->frame_idx * buf->per_frame_size;
+		max_size = buf->per_frame_size;
+	}
+	uint64_t flush_offset = base_offset;
+	uint64_t flush_size = max_size;
+	if (p_size > 0) {
+		if (p_offset >= max_size) {
+			buf->dirty_offset = 0;
+			buf->dirty_end = 0;
+			return;
+		}
+		flush_offset = base_offset + p_offset;
+		flush_size = MIN(p_size, max_size - p_offset);
+		uint64_t aligned_offset = flush_offset & ~3ULL;
+		uint64_t aligned_end = MIN(base_offset + max_size, (flush_offset + flush_size + 3ULL) & ~3ULL);
+		flush_offset = aligned_offset;
+		flush_size = aligned_end - aligned_offset;
+	} else if (buf->dirty_end > buf->dirty_offset) {
+		flush_offset = buf->dirty_offset;
+		flush_size = buf->dirty_end - buf->dirty_offset;
+	}
+	if (flush_size > 0) {
+		wgpuQueueWriteBuffer(queue, buf->handle, flush_offset, buf->shadow_map + flush_offset, flush_size);
+	}
+	buf->dirty_offset = 0;
+	buf->dirty_end = 0;
 }
 
 void RenderingDeviceDriverWebGPU::buffer_write_direct(BufferID p_buffer, uint64_t p_offset, uint64_t p_size, const void *p_data) {
@@ -5582,9 +5622,6 @@ void RenderingDeviceDriverWebGPU::command_copy_texture_to_buffer(CommandBufferID
 void RenderingDeviceDriverWebGPU::pipeline_free(PipelineID p_pipeline) {
 	WGPipelineWrapper *pw = (WGPipelineWrapper *)(p_pipeline.id);
 	ERR_FAIL_NULL(pw);
-	if (pw->deferred) {
-		memdelete(pw->deferred);
-	}
 #ifdef WEB_ENABLED
 	{
 		MutexLock lock(prewarm_mutex);
@@ -5592,6 +5629,9 @@ void RenderingDeviceDriverWebGPU::pipeline_free(PipelineID p_pipeline) {
 	}
 	_release_prewarm(pw);
 #endif
+	if (pw->deferred) {
+		memdelete(pw->deferred);
+	}
 	if (pw->type == WGPipelineWrapper::RENDER && pw->render_handle) {
 		wgpuRenderPipelineRelease(pw->render_handle);
 		if (pw->render_handle_u16) {
@@ -5607,6 +5647,35 @@ void RenderingDeviceDriverWebGPU::pipeline_free(PipelineID p_pipeline) {
 		}
 	}
 	memdelete(pw);
+}
+
+bool RenderingDeviceDriverWebGPU::pipeline_is_ready(PipelineID p_pipeline) {
+#ifdef WEB_ENABLED
+	WGPipelineWrapper *pw = (WGPipelineWrapper *)(p_pipeline.id);
+	if (!pw || !pw->deferred) {
+		return true;
+	}
+	{
+		MutexLock lock(prewarm_mutex);
+		if (pw->prewarm) {
+			return pw->prewarm->pending == 0;
+		}
+		if (prewarm_queue.has(pw)) {
+			return false;
+		}
+	}
+#endif
+	return true;
+}
+
+bool RenderingDeviceDriverWebGPU::has_pending_pipelines() {
+#ifdef WEB_ENABLED
+	_drain_prewarm();
+	MutexLock lock(prewarm_mutex);
+	return pending_async_prewarms > 0 || !prewarm_queue.is_empty();
+#else
+	return false;
+#endif
 }
 
 void RenderingDeviceDriverWebGPU::command_bind_push_constants(CommandBufferID p_cmd_buffer, ShaderID p_shader, uint32_t p_first_index, VectorView<uint32_t> p_data) {
@@ -6251,6 +6320,7 @@ void RenderingDeviceDriverWebGPU::command_begin_render_pass(CommandBufferID p_cm
 	cmd->render_state.scissor_set = false;
 	cmd->render_state.blend_constant_set = false;
 	cmd->render_state.current_pipeline = nullptr;
+	cmd->render_state.pipeline_failed = false;
 	cmd->render_state.current_index_buffer = nullptr;
 	cmd->render_state.current_index_offset = 0;
 	memset(cmd->render_state.current_vertex_buffers, 0, sizeof(cmd->render_state.current_vertex_buffers));
@@ -6398,6 +6468,7 @@ void RenderingDeviceDriverWebGPU::command_next_render_subpass(CommandBufferID p_
 	cmd->render_state.scissor_set = false;
 	cmd->render_state.blend_constant_set = false;
 	cmd->render_state.current_pipeline = nullptr;
+	cmd->render_state.pipeline_failed = false;
 	cmd->render_state.current_index_buffer = nullptr;
 	cmd->render_state.current_index_offset = 0;
 	memset(cmd->render_state.current_vertex_buffers, 0, sizeof(cmd->render_state.current_vertex_buffers));
@@ -6676,8 +6747,17 @@ void RenderingDeviceDriverWebGPU::command_bind_render_pipeline(CommandBufferID p
 	if (pw->deferred) {
 		_create_deferred_pipeline(pw);
 	}
-	ERR_FAIL_NULL(pw->render_handle);
+	if (!pw->render_handle) {
+		cmd->render_state.current_pipeline = nullptr;
+		cmd->render_state.pipeline_failed = true;
+		if (!pw->error_reported) {
+			pw->error_reported = true;
+			ERR_PRINT(vformat("WebGPU: Skipping draws for failed render pipeline '%s'.", pw->shader ? pw->shader->name : String("?")));
+		}
+		return;
+	}
 
+	cmd->render_state.pipeline_failed = false;
 	wgpuRenderPassEncoderSetPipeline(cmd->render_encoder, pw->render_handle);
 	wgpuRenderPassEncoderSetStencilReference(cmd->render_encoder, pw->stencil_reference);
 	cmd->render_state.current_pipeline = pw;
@@ -6697,6 +6777,9 @@ void RenderingDeviceDriverWebGPU::command_bind_render_uniform_sets(CommandBuffer
 	WGCommandBuffer *cmd = (WGCommandBuffer *)(p_cmd_buffer.id);
 	ERR_FAIL_NULL(cmd);
 	ERR_FAIL_COND(!cmd->render_encoder);
+	if (cmd->render_state.pipeline_failed) {
+		return;
+	}
 
 	WGShader *pipeline_shader = cmd->render_state.current_pipeline ? cmd->render_state.current_pipeline->shader : nullptr;
 
@@ -6823,10 +6906,11 @@ void RenderingDeviceDriverWebGPU::command_render_draw(CommandBufferID p_cmd_buff
 	WGCommandBuffer *cmd = (WGCommandBuffer *)(p_cmd_buffer.id);
 	ERR_FAIL_NULL(cmd);
 	ERR_FAIL_COND(!cmd->render_encoder);
-
-	if (cmd->render_state.current_pipeline) {
-		_flush_push_constants(cmd, cmd->render_state.current_pipeline->shader);
+	if (cmd->render_state.pipeline_failed || !cmd->render_state.current_pipeline) {
+		return;
 	}
+
+	_flush_push_constants(cmd, cmd->render_state.current_pipeline->shader);
 
 	perf.draw_calls++;
 	if (p_first_instance > 0) {
@@ -6841,16 +6925,17 @@ void RenderingDeviceDriverWebGPU::command_render_draw_indexed(CommandBufferID p_
 	ERR_FAIL_COND(!cmd->render_encoder);
 
 	WGPipelineWrapper *pw = cmd->render_state.current_pipeline;
-	if (pw) {
-		_flush_push_constants(cmd, pw->shader);
-		// For strip topologies, ensure the pipeline variant matches the bound index format.
-		// Always select the correct variant — the format may have changed since pipeline bind.
-		if (pw->is_strip && pw->render_handle_u16) {
-			WGPURenderPipeline needed = (cmd->render_state.current_index_format == WGPUIndexFormat_Uint16)
-					? pw->render_handle_u16
-					: pw->render_handle;
-			wgpuRenderPassEncoderSetPipeline(cmd->render_encoder, needed);
-		}
+	if (cmd->render_state.pipeline_failed || !pw) {
+		return;
+	}
+	_flush_push_constants(cmd, pw->shader);
+	// For strip topologies, ensure the pipeline variant matches the bound index format.
+	// Always select the correct variant — the format may have changed since pipeline bind.
+	if (pw->is_strip && pw->render_handle_u16) {
+		WGPURenderPipeline needed = (cmd->render_state.current_index_format == WGPUIndexFormat_Uint16)
+				? pw->render_handle_u16
+				: pw->render_handle;
+		wgpuRenderPassEncoderSetPipeline(cmd->render_encoder, needed);
 	}
 
 	perf.draw_calls++;
@@ -6868,14 +6953,15 @@ void RenderingDeviceDriverWebGPU::command_render_draw_indexed_indirect(CommandBu
 	ERR_FAIL_COND(!cmd->render_encoder);
 
 	WGPipelineWrapper *pw = cmd->render_state.current_pipeline;
-	if (pw) {
-		_flush_push_constants(cmd, pw->shader);
-		if (pw->is_strip && pw->render_handle_u16) {
-			WGPURenderPipeline needed = (cmd->render_state.current_index_format == WGPUIndexFormat_Uint16)
-					? pw->render_handle_u16
-					: pw->render_handle;
-			wgpuRenderPassEncoderSetPipeline(cmd->render_encoder, needed);
-		}
+	if (cmd->render_state.pipeline_failed || !pw) {
+		return;
+	}
+	_flush_push_constants(cmd, pw->shader);
+	if (pw->is_strip && pw->render_handle_u16) {
+		WGPURenderPipeline needed = (cmd->render_state.current_index_format == WGPUIndexFormat_Uint16)
+				? pw->render_handle_u16
+				: pw->render_handle;
+		wgpuRenderPassEncoderSetPipeline(cmd->render_encoder, needed);
 	}
 
 	// WebGPU has no multi-draw-indirect — must loop.
@@ -6895,10 +6981,11 @@ void RenderingDeviceDriverWebGPU::command_render_draw_indirect(CommandBufferID p
 	ERR_FAIL_NULL(cmd);
 	ERR_FAIL_NULL(indirect);
 	ERR_FAIL_COND(!cmd->render_encoder);
-
-	if (cmd->render_state.current_pipeline) {
-		_flush_push_constants(cmd, cmd->render_state.current_pipeline->shader);
+	if (cmd->render_state.pipeline_failed || !cmd->render_state.current_pipeline) {
+		return;
 	}
+
+	_flush_push_constants(cmd, cmd->render_state.current_pipeline->shader);
 
 	for (uint32_t i = 0; i < p_draw_count; i++) {
 		wgpuRenderPassEncoderDrawIndirect(cmd->render_encoder, indirect->handle, p_offset + i * p_stride);
@@ -7220,43 +7307,79 @@ RDD::PipelineID RenderingDeviceDriverWebGPU::render_pipeline_create(
 
 #ifdef WEB_ENABLED
 
-static void _prewarm_arrived(WGPUCreatePipelineAsyncStatus, WGPURenderPipeline p_pipeline, WGPUStringView, void *p_userdata, void *) {
-	WGPrewarm *prewarm = (WGPrewarm *)p_userdata;
+void RenderingDeviceDriverWebGPU::_prewarm_render_arrived(WGPUCreatePipelineAsyncStatus p_status, WGPURenderPipeline p_pipeline, WGPUStringView p_message, void *p_userdata1, void *p_userdata2) {
+	WGPrewarm *prewarm = (WGPrewarm *)p_userdata1;
+	const uintptr_t slot = (uintptr_t)p_userdata2;
+	bool log_failure = false;
+	String failed_label;
+	RenderingDeviceDriverWebGPU *driver = nullptr;
 	{
 		MutexLock lock(prewarm_mutex);
 		prewarm->pending--;
 		if (!prewarm->abandoned) {
-			prewarm->results[prewarm->results[0] ? 1 : 0] = p_pipeline;
-			return;
-		}
-		if (prewarm->pending == 0) {
+			if (pending_async_prewarms > 0) {
+				pending_async_prewarms--;
+			}
+			if (p_status == WGPUCreatePipelineAsyncStatus_Success && p_pipeline && slot < 2) {
+				prewarm->render_results[slot] = p_pipeline;
+				p_pipeline = nullptr;
+			} else {
+				log_failure = true;
+				failed_label = prewarm->label;
+				if (slot == 0) {
+					prewarm->failed = true;
+				}
+			}
+		} else if (prewarm->pending == 0) {
 			memdelete(prewarm);
 		}
+		driver = active_prewarm_driver;
 	}
 	if (p_pipeline) {
 		wgpuRenderPipelineRelease(p_pipeline);
 	}
+	if (log_failure) {
+		String error_msg;
+		if (p_message.data) {
+			if (p_message.length == WGPU_STRLEN) {
+				error_msg = String::utf8(p_message.data);
+			} else if (p_message.length > 0) {
+				error_msg = String::utf8(p_message.data, (int)p_message.length);
+			}
+		}
+		ERR_PRINT(vformat("WebGPU: Async render pipeline '%s' (slot %d) failed (status=%d): %s", failed_label, (int)slot, (int)p_status, error_msg));
+	}
+	if (driver) {
+		driver->_drain_prewarm();
+	}
 }
 
 void RenderingDeviceDriverWebGPU::_queue_prewarm(WGPipelineWrapper *p_pw) {
-#ifdef THREADS_ENABLED
-	if (pthread_self() != emwgpuGetDeviceThread()) {
+	{
 		MutexLock lock(prewarm_mutex);
-		prewarm_queue.push_back(p_pw);
-		return;
+		if (!prewarm_queue.has(p_pw)) {
+			prewarm_queue.push_back(p_pw);
+		}
 	}
-#endif
-	_prewarm_pipeline(p_pw);
+	_drain_prewarm();
 }
 
 void RenderingDeviceDriverWebGPU::_drain_prewarm() {
-	LocalVector<WGPipelineWrapper *> queued;
-	{
-		MutexLock lock(prewarm_mutex);
-		queued = prewarm_queue;
-		prewarm_queue.clear();
+#ifdef THREADS_ENABLED
+	if (pthread_self() != emwgpuGetDeviceThread()) {
+		return;
 	}
-	for (WGPipelineWrapper *pw : queued) {
+#endif
+	while (true) {
+		WGPipelineWrapper *pw = nullptr;
+		{
+			MutexLock lock(prewarm_mutex);
+			if (pending_async_prewarms >= MAX_INFLIGHT_PREWARMS || prewarm_queue.is_empty()) {
+				break;
+			}
+			pw = prewarm_queue[0];
+			prewarm_queue.remove_at(0);
+		}
 		_prewarm_pipeline(pw);
 	}
 }
@@ -7270,31 +7393,52 @@ void RenderingDeviceDriverWebGPU::_prewarm_pipeline(WGPipelineWrapper *p_pw) {
 	}
 #endif
 	const WGDeferredPipeline *d = p_pw->deferred;
-	// Without override constants each creation makes its own shader modules, so the browser couldn't match the two.
-	if (!d || p_pw->prewarm || (!p_pw->shader->has_override_declarations && !d->specialization_constants.is_empty())) {
+	// Legacy SPIR-V specialization creates per-pipeline modules that prewarm would leak on early return.
+	if (!d || (!p_pw->shader->has_override_declarations && !d->specialization_constants.is_empty())) {
 		return;
 	}
-	p_pw->prewarm = memnew(WGPrewarm);
-	_create_deferred_pipeline(p_pw, p_pw->prewarm);
+	WGPrewarm *prewarm = memnew(WGPrewarm);
+	{
+		MutexLock lock(prewarm_mutex);
+		if (p_pw->prewarm) {
+			memdelete(prewarm);
+			return;
+		}
+		p_pw->prewarm = prewarm;
+	}
+	_create_deferred_pipeline(p_pw, prewarm);
+	// Drop empty prewarm if validation failed before submitting an async request.
+	bool empty = false;
+	{
+		MutexLock lock(prewarm_mutex);
+		if (p_pw->prewarm == prewarm && prewarm->pending == 0 && !prewarm->render_results[0] && !prewarm->failed) {
+			p_pw->prewarm = nullptr;
+			empty = true;
+		}
+	}
+	if (empty) {
+		memdelete(prewarm);
+	}
 }
 
 void RenderingDeviceDriverWebGPU::_release_prewarm(WGPipelineWrapper *p_pw) {
-	WGPrewarm *prewarm = p_pw->prewarm;
-	if (!prewarm) {
-		return;
-	}
-	p_pw->prewarm = nullptr;
 	WGPrewarm results;
 	{
 		MutexLock lock(prewarm_mutex);
+		WGPrewarm *prewarm = p_pw->prewarm;
+		if (!prewarm) {
+			return;
+		}
+		p_pw->prewarm = nullptr;
 		results = *prewarm;
 		if (prewarm->pending) {
+			pending_async_prewarms = pending_async_prewarms > prewarm->pending ? pending_async_prewarms - prewarm->pending : 0;
 			prewarm->abandoned = true;
 		} else {
 			memdelete(prewarm);
 		}
 	}
-	for (WGPURenderPipeline pipeline : results.results) {
+	for (WGPURenderPipeline pipeline : results.render_results) {
 		if (pipeline) {
 			wgpuRenderPipelineRelease(pipeline);
 		}
@@ -7306,7 +7450,50 @@ void RenderingDeviceDriverWebGPU::_create_deferred_pipeline(WGPipelineWrapper *p
 	WGDeferredPipeline *d = p_pw->deferred;
 #ifdef WEB_ENABLED
 	if (!p_prewarm) {
-		// Everything queued goes to the browser first, so it compiles in parallel with this pipeline.
+		// Adopt finished async handles directly instead of recompiling synchronously (crucial on Firefox).
+		WGPURenderPipeline adopted_render[2] = {};
+		uint32_t adopted_stencil_ref = 0;
+		bool adopted_is_strip = false;
+		bool adopted = false;
+		bool failed = false;
+		{
+			MutexLock lock(prewarm_mutex);
+			WGPrewarm *prewarm = p_pw->prewarm;
+			if (prewarm && prewarm->pending == 0) {
+				if (prewarm->failed) {
+					failed = true;
+					p_pw->prewarm = nullptr;
+					memdelete(prewarm);
+				} else if (prewarm->render_results[0]) {
+					adopted_render[0] = prewarm->render_results[0];
+					adopted_render[1] = prewarm->render_results[1];
+					adopted_stencil_ref = prewarm->stencil_reference;
+					adopted_is_strip = prewarm->is_strip;
+					adopted = true;
+					p_pw->prewarm = nullptr;
+					memdelete(prewarm);
+				}
+			}
+		}
+		if (failed) {
+			p_pw->deferred = nullptr;
+			memdelete(d);
+			ERR_FAIL_MSG(vformat("WebGPU: Async render pipeline '%s' creation failed.", p_pw->shader ? p_pw->shader->name : String("?")));
+		}
+		if (adopted) {
+			p_pw->deferred = nullptr;
+			memdelete(d);
+			p_pw->render_handle = adopted_render[0];
+			p_pw->render_handle_u16 = adopted_render[1];
+			p_pw->stencil_reference = adopted_stencil_ref;
+			p_pw->is_strip = adopted_is_strip;
+			return;
+		}
+		// Remove this pipeline before topping up the async window so it is not prewarmed during synchronous fallback.
+		{
+			MutexLock lock(prewarm_mutex);
+			prewarm_queue.erase(p_pw);
+		}
 		p_pw->deferred = nullptr;
 		_drain_prewarm();
 	}
@@ -7323,7 +7510,7 @@ void RenderingDeviceDriverWebGPU::_create_deferred_pipeline(WGPipelineWrapper *p
 #ifdef WEB_ENABLED
 	prewarm_request = nullptr;
 	if (p_prewarm) {
-		return; // The creation arguments stay for the synchronous creation on first bind.
+		return; // The creation arguments stay for the synchronous fallback if bound before completion.
 	}
 #endif
 	memdelete(d);
@@ -7820,11 +8007,20 @@ RDD::PipelineID RenderingDeviceDriverWebGPU::_render_pipeline_create_now(
 	if (prewarm_request) {
 		WGPUCreateRenderPipelineAsyncCallbackInfo info = {};
 		info.mode = WGPUCallbackMode_AllowSpontaneous;
-		info.callback = _prewarm_arrived;
+		info.callback = _prewarm_render_arrived;
 		info.userdata1 = prewarm_request;
+		const uint32_t count = is_strip ? 2 : 1;
+		{
+			MutexLock lock(prewarm_mutex);
+			prewarm_request->label = vformat("%s (ms=%d, targets=%d, ds=%d, vbufs=%d, vconsts=%d, fconsts=%d)", _pipeline_label_str, (int)multisample.count, (int)color_target_count, ds_ptr ? (int)ds.format : 0, (int)vb_layouts.size(), (int)vertex_constants.size(), (int)frag_constants.size());
+			prewarm_request->is_strip = is_strip;
+			prewarm_request->stencil_reference = p_depth_stencil_state.front_op.reference;
+			prewarm_request->pending = count;
+			pending_async_prewarms += count;
+		}
 		// Strips also get their Uint16 variant, like below.
-		for (int i = 0; i < (is_strip ? 2 : 1); i++) {
-			prewarm_request->pending++;
+		for (uint32_t i = 0; i < count; i++) {
+			info.userdata2 = (void *)(uintptr_t)i;
 			wgpuDeviceCreateRenderPipelineAsync(device, &desc, info);
 			desc.primitive.stripIndexFormat = WGPUIndexFormat_Uint16;
 		}
@@ -7875,7 +8071,16 @@ void RenderingDeviceDriverWebGPU::command_bind_compute_pipeline(CommandBufferID 
 	if (pw->deferred) {
 		_create_deferred_pipeline(pw);
 	}
-	ERR_FAIL_NULL(pw->compute_handle);
+	if (!pw->compute_handle) {
+		cmd->render_state.current_pipeline = nullptr;
+		cmd->render_state.pipeline_failed = true;
+		if (!pw->error_reported) {
+			pw->error_reported = true;
+			ERR_PRINT(vformat("WebGPU: Skipping dispatches for failed compute pipeline '%s'.", pw->shader ? pw->shader->name : String("?")));
+		}
+		return;
+	}
+	cmd->render_state.pipeline_failed = false;
 
 	// Ensure we're in a compute pass (end any active render pass).
 	if (cmd->active_encoder == WGCommandBuffer::RENDER) {
@@ -7901,6 +8106,9 @@ void RenderingDeviceDriverWebGPU::command_bind_compute_pipeline(CommandBufferID 
 void RenderingDeviceDriverWebGPU::command_bind_compute_uniform_sets(CommandBufferID p_cmd_buffer, VectorView<UniformSetID> p_uniform_sets, ShaderID p_shader, uint32_t p_first_set_index, uint32_t p_set_count, uint32_t p_dynamic_offsets) {
 	WGCommandBuffer *cmd = (WGCommandBuffer *)(p_cmd_buffer.id);
 	ERR_FAIL_NULL(cmd);
+	if (cmd->render_state.pipeline_failed) {
+		return;
+	}
 	ERR_FAIL_COND(!cmd->compute_encoder);
 
 	WGShader *pipeline_shader = cmd->render_state.current_pipeline ? cmd->render_state.current_pipeline->shader : nullptr;
@@ -7967,11 +8175,12 @@ void RenderingDeviceDriverWebGPU::command_bind_compute_uniform_sets(CommandBuffe
 void RenderingDeviceDriverWebGPU::command_compute_dispatch(CommandBufferID p_cmd_buffer, uint32_t p_x_groups, uint32_t p_y_groups, uint32_t p_z_groups) {
 	WGCommandBuffer *cmd = (WGCommandBuffer *)(p_cmd_buffer.id);
 	ERR_FAIL_NULL(cmd);
+	if (cmd->render_state.pipeline_failed || !cmd->render_state.current_pipeline) {
+		return;
+	}
 	ERR_FAIL_COND(!cmd->compute_encoder);
 
-	if (cmd->render_state.current_pipeline) {
-		_flush_push_constants(cmd, cmd->render_state.current_pipeline->shader);
-	}
+	_flush_push_constants(cmd, cmd->render_state.current_pipeline->shader);
 
 	wgpuComputePassEncoderDispatchWorkgroups(cmd->compute_encoder, p_x_groups, p_y_groups, p_z_groups);
 }
@@ -7981,11 +8190,12 @@ void RenderingDeviceDriverWebGPU::command_compute_dispatch_indirect(CommandBuffe
 	WGBuffer *indirect = (WGBuffer *)(p_indirect_buffer.id);
 	ERR_FAIL_NULL(cmd);
 	ERR_FAIL_NULL(indirect);
+	if (cmd->render_state.pipeline_failed || !cmd->render_state.current_pipeline) {
+		return;
+	}
 	ERR_FAIL_COND(!cmd->compute_encoder);
 
-	if (cmd->render_state.current_pipeline) {
-		_flush_push_constants(cmd, cmd->render_state.current_pipeline->shader);
-	}
+	_flush_push_constants(cmd, cmd->render_state.current_pipeline->shader);
 
 	wgpuComputePassEncoderDispatchWorkgroupsIndirect(cmd->compute_encoder, indirect->handle, p_offset);
 }
@@ -8198,7 +8408,9 @@ void RenderingDeviceDriverWebGPU::begin_segment(uint32_t p_frame_index, uint32_t
 }
 
 void RenderingDeviceDriverWebGPU::end_segment() {
-	// Nothing to do.
+#ifdef WEB_ENABLED
+	_drain_prewarm();
+#endif
 }
 
 // =============================================================================

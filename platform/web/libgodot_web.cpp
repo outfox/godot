@@ -18,6 +18,7 @@
 #include "core/string/print_string.h"
 #include "core/variant/variant.h"
 #include "main/main.h"
+#include "servers/rendering/rendering_device.h"
 #include "servers/rendering/rendering_server_globals.h"
 
 #include <emscripten/emscripten.h>
@@ -27,6 +28,8 @@
 static OS_Web *os = nullptr;
 
 static GodotInstance *instance = nullptr;
+static int reported_frames = 0;
+static bool waiting_for_pipelines = false;
 #ifndef PROXY_TO_PTHREAD_ENABLED
 uint64_t target_ticks = 0;
 #endif
@@ -57,6 +60,8 @@ GDExtensionObjectPtr libgodot_create_godot_instance(int p_argc, char *p_argv[], 
 	CoreGlobals::global_init_func_libgodot = p_init_func;
 	CoreGlobals::engine_reinit_enabled = true;
 	CoreGlobals::libgodot_host_instance = true;
+	reported_frames = 0;
+	waiting_for_pipelines = false;
 #ifndef PROXY_TO_PTHREAD_ENABLED
 	target_ticks = 0;
 #endif
@@ -137,11 +142,24 @@ extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
 	}
 #endif
 
+	// 2dog: avoid re-rendering and flooding the GPU queue while async pipelines finish compiling.
+	if (waiting_for_pipelines) {
+		RenderingDevice *rd = RenderingDevice::get_singleton();
+		if (rd && rd->has_pending_pipelines()) {
+			return false;
+		}
+		waiting_for_pipelines = false;
+	}
+
 	const uint64_t skipped_draws = RSG::pipeline_skipped_draws;
 	const bool exit = os->main_loop_iterate();
 
+	if (skipped_draws != RSG::pipeline_skipped_draws) {
+		RenderingDevice *rd = RenderingDevice::get_singleton();
+		waiting_for_pipelines = rd && rd->has_pending_pipelines();
+	}
+
 	// 2dog: the page's loading screen stays over the first complete frames, which still stall on shader compilation.
-	static int reported_frames = 0;
 	if (reported_frames < 8 && skipped_draws == RSG::pipeline_skipped_draws) {
 		MAIN_THREAD_ASYNC_EM_ASM({ dispatchEvent(new CustomEvent('2dog:frame', { detail : $0 })); }, ++reported_frames);
 	}

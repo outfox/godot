@@ -238,12 +238,16 @@ struct WGFramebuffer {
 // Pipeline
 // =============================================================================
 
-// Async creations of a render pipeline that hasn't been bound yet (web only). The results are only kept alive:
-// creating the same pipeline synchronously on first bind then costs the browser nothing.
+// Async creation of a deferred render pipeline (web only). Completed handles are adopted on first bind,
+// and pending count lets scene draws wait without blocking or flooding the GPU queue.
 struct WGPrewarm {
-	WGPURenderPipeline results[2] = {}; // Strips have a second, Uint16 variant.
+	WGPURenderPipeline render_results[2] = {}; // Strips have a second, Uint16 variant at index 1.
+	String label;
+	uint32_t stencil_reference = 0;
 	uint32_t pending = 0;
-	bool abandoned = false; // The pipeline was created or freed; later results are released on arrival.
+	bool is_strip = false;
+	bool failed = false;
+	bool abandoned = false; // The pipeline was created synchronously or freed; later results are released on arrival.
 };
 
 struct WGPipelineWrapper {
@@ -267,6 +271,7 @@ struct WGPipelineWrapper {
 	// Uint32 variants and select the correct one at draw time.
 	WGPURenderPipeline render_handle_u16 = nullptr;
 	bool is_strip = false;
+	bool error_reported = false;
 	// Creation arguments of a pipeline that is created on first bind (web only).
 	struct WGDeferredPipeline *deferred = nullptr;
 	WGPrewarm *prewarm = nullptr;
@@ -385,6 +390,7 @@ struct WGCommandBuffer {
 		WGFramebuffer *framebuffer = nullptr;
 		uint32_t current_subpass = 0;
 		WGPipelineWrapper *current_pipeline = nullptr;
+		bool pipeline_failed = false;
 		WGPUIndexFormat current_index_format = WGPUIndexFormat_Uint32;
 		// Right and bottom edges of the render area, which scissors are clamped to.
 		uint32_t render_area_width = 0;

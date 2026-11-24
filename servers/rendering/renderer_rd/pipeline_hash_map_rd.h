@@ -68,6 +68,11 @@ private:
 			MutexLock lock(compiled_queue_mutex);
 			for (const Pair<uint32_t, RID> &pair : compiled_queue) {
 				hash_map[pair.first] = pair.second;
+#ifdef WEB_ENABLED
+				if (pair.second.is_valid()) {
+					pending_ready.insert(pair.first);
+				}
+#endif
 				hashes_added.push_back(pair.first);
 			}
 
@@ -89,6 +94,7 @@ private:
 
 #ifdef WEB_ENABLED
 	uint64_t last_added_frame = UINT64_MAX;
+	RBSet<uint32_t> pending_ready;
 
 	// Makes pipelines requested in earlier frames visible, once per frame: the browser has then received all of a
 	// frame's requests before the first is bound, and compiles them in parallel.
@@ -270,6 +276,15 @@ public:
 				return RID();
 			}
 		} else {
+#ifdef WEB_ENABLED
+			if (!p_wait_for_compilation && !pending_ready.is_empty() && pending_ready.has(p_key_hash)) {
+				if (!RD::get_singleton()->render_pipeline_is_ready(e->value())) {
+					RSG::pipeline_skipped_draws++;
+					return RID();
+				}
+				pending_ready.erase(p_key_hash);
+			}
+#endif
 			return e->value();
 		}
 	}
@@ -285,6 +300,9 @@ public:
 
 		hash_map.clear();
 		compilation_set.clear();
+#ifdef WEB_ENABLED
+		pending_ready.clear();
+#endif
 	}
 
 	// Set the external pipeline compilations array to increase the counters on every time a pipeline is compiled.
