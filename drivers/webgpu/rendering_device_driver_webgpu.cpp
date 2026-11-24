@@ -4177,6 +4177,36 @@ RDD::ShaderID RenderingDeviceDriverWebGPU::shader_create_from_container(const Re
 						ae.texture.multisampled = false;
 						merged_entries.push_back(ae);
 					}
+					// Firefox/wgpu DX12 fails PSO creation (E_INVALIDARG) when a merged PC group mixes a vertex-visible
+					// dynamic storage buffer with fragment-only table entries. Share vertex visibility on one eligible entry.
+					if (!shader->stage_wgsl[SHADER_STAGE_VERTEX].is_empty() &&
+							!shader->stage_wgsl[SHADER_STAGE_FRAGMENT].is_empty()) {
+						bool has_vertex_non_pc = false;
+						WGPUBindGroupLayoutEntry *promote = nullptr;
+						for (auto &me : merged_entries) {
+							if (me.binding == PUSH_CONSTANT_RING_BINDING) {
+								continue;
+							}
+							if (me.visibility & WGPUShaderStage_Vertex) {
+								has_vertex_non_pc = true;
+								break;
+							}
+							if (!(me.visibility & WGPUShaderStage_Fragment)) {
+								continue;
+							}
+							if (me.buffer.type == WGPUBufferBindingType_Storage ||
+									(me.storageTexture.access != WGPUStorageTextureAccess_BindingNotUsed &&
+											me.storageTexture.access != WGPUStorageTextureAccess_Undefined)) {
+								continue;
+							}
+							if (!promote || me.buffer.type == WGPUBufferBindingType_Uniform) {
+								promote = &me;
+							}
+						}
+						if (!has_vertex_non_pc && promote) {
+							promote->visibility = (WGPUShaderStage)(promote->visibility | WGPUShaderStage_Vertex);
+						}
+					}
 					WGPUBindGroupLayoutDescriptor merged_desc = {};
 					merged_desc.entryCount = merged_entries.size();
 					merged_desc.entries = merged_entries.ptr();
