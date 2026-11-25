@@ -201,6 +201,7 @@ public:
 	int total_draw_calls_used = 0;
 
 	int num_viewports_with_motion_vectors = 0;
+	bool has_presented_screen = false;
 
 private:
 	Vector<Viewport *> _sort_active_viewports();

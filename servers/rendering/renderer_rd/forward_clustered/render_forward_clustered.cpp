@@ -440,11 +440,12 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 		pipeline_specialization.material_feedback = p_params->use_material_feedback && surf->material->material_feedback_rid.is_valid();
 
 		if constexpr (p_pass_mode == PASS_MODE_COLOR) {
-			pipeline_specialization.use_light_soft_shadows = element_info.uses_softshadow;
 #ifdef WEB_ENABLED
-			// Always on: a new variant of every lit pipeline would stall the browser when a projector first lights up.
+			// Always on: toggling soft shadows or projectors per-object compiles duplicate pipelines mid-game.
+			pipeline_specialization.use_light_soft_shadows = true;
 			pipeline_specialization.use_light_projector = true;
 #else
+			pipeline_specialization.use_light_soft_shadows = element_info.uses_softshadow;
 			pipeline_specialization.use_light_projector = element_info.uses_projector;
 #endif
 			pipeline_specialization.use_directional_soft_shadows = p_params->use_directional_soft_shadow;

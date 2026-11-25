@@ -8,9 +8,7 @@
 #include "core/core_globals.h"
 #include "core/profiling/profiling.h"
 
-#ifndef PROXY_TO_PTHREAD_ENABLED
 #include "core/config/engine.h"
-#endif
 #include "core/extension/godot_instance.h"
 #include "core/extension/libgodot.h"
 #include "core/io/resource_loader.h"
@@ -30,6 +28,8 @@ static OS_Web *os = nullptr;
 static GodotInstance *instance = nullptr;
 static int reported_frames = 0;
 static bool waiting_for_pipelines = false;
+static uint64_t last_frame_usec = 0;
+static uint32_t gpu_queue_skips = 0;
 #ifndef PROXY_TO_PTHREAD_ENABLED
 uint64_t target_ticks = 0;
 #endif
@@ -62,6 +62,8 @@ GDExtensionObjectPtr libgodot_create_godot_instance(int p_argc, char *p_argv[], 
 	CoreGlobals::libgodot_host_instance = true;
 	reported_frames = 0;
 	waiting_for_pipelines = false;
+	last_frame_usec = 0;
+	gpu_queue_skips = 0;
 #ifndef PROXY_TO_PTHREAD_ENABLED
 	target_ticks = 0;
 #endif
@@ -151,10 +153,39 @@ extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
 		waiting_for_pipelines = false;
 	}
 
+	// 2dog: cap in-flight GPU frames so input and simulation stay in sync with what is on screen.
+	if (RenderingDevice *rd = RenderingDevice::get_singleton(); rd && rd->is_gpu_queue_full()) {
+		gpu_queue_skips++;
+		return false;
+	}
+
+	const uint64_t iter_start = is_print_verbose_enabled() ? os->get_ticks_usec() : 0;
+	const uint64_t phys_before = is_print_verbose_enabled() ? Engine::get_singleton()->get_physics_frames() : 0;
 	const uint64_t skipped_draws = RSG::pipeline_skipped_draws;
 	const bool exit = os->main_loop_iterate();
 
-	if (skipped_draws != RSG::pipeline_skipped_draws) {
+	if (is_print_verbose_enabled()) {
+		const uint64_t iter_end = os->get_ticks_usec();
+		if (reported_frames >= 8 && last_frame_usec > 0) {
+			const uint64_t wall_usec = iter_end - last_frame_usec;
+			const uint64_t cpu_usec = iter_end - iter_start;
+			const uint64_t phys_steps = Engine::get_singleton()->get_physics_frames() - phys_before;
+			const uint64_t pipe_skips = RSG::pipeline_skipped_draws - skipped_draws;
+			if (wall_usec >= 40000 || cpu_usec >= 25000 || pipe_skips > 0) {
+				const Main::FrameTimings &t = Main::last_frame_timings;
+				print_line(vformat("WebGPU: slow frame #%d: wall=%.1fms cpu=%.1fms (phys=%d: script=%.1fms jolt=%.1fms, proc=%.1fms, render=%.1fms, tail=%.1fms) gpu_waits=%d pipe_skips=%d",
+						(int)Engine::get_singleton()->get_process_frames(), wall_usec / 1000.0, cpu_usec / 1000.0,
+						(int)phys_steps, t.phys_script_usec / 1000.0, t.phys_jolt_usec / 1000.0,
+						t.process_usec / 1000.0, t.render_usec / 1000.0, t.tail_usec / 1000.0,
+						(int)gpu_queue_skips, (int)pipe_skips));
+			}
+		}
+		last_frame_usec = iter_end;
+		gpu_queue_skips = 0;
+	}
+
+	// Only pause the loop during boot under the splash screen; mid-game async compiles run in the background.
+	if (reported_frames < 8 && skipped_draws != RSG::pipeline_skipped_draws) {
 		RenderingDevice *rd = RenderingDevice::get_singleton();
 		waiting_for_pipelines = rd && rd->has_pending_pipelines();
 	}

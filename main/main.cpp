@@ -5161,6 +5161,7 @@ uint32_t Main::hide_print_fps_attempts = 3;
 uint32_t Main::frame = 0;
 bool Main::force_redraw_requested = false;
 int Main::iterating = 0;
+Main::FrameTimings Main::last_frame_timings = {};
 
 bool Main::is_iterating() {
 	return iterating > 0;
@@ -5215,6 +5216,8 @@ bool Main::iteration() {
 	}
 
 	bool exit = false;
+	const bool track_timings = is_print_verbose_enabled();
+	FrameTimings timings = {};
 
 	// process all our active interfaces
 #ifndef XR_DISABLED
@@ -5243,8 +5246,12 @@ bool Main::iteration() {
 
 #ifndef PHYSICS_3D_DISABLED
 		GodotProfileZoneGrouped(_physics_zone, "PhysicsServer3D::sync");
+		const uint64_t jolt_sync_begin = track_timings ? OS::get_singleton()->get_ticks_usec() : 0;
 		PhysicsServer3D::get_singleton()->sync();
 		PhysicsServer3D::get_singleton()->flush_queries();
+		if (track_timings) {
+			timings.phys_jolt_usec += OS::get_singleton()->get_ticks_usec() - jolt_sync_begin;
+		}
 #endif // PHYSICS_3D_DISABLED
 
 #ifndef PHYSICS_2D_DISABLED
@@ -5254,7 +5261,12 @@ bool Main::iteration() {
 #endif // PHYSICS_2D_DISABLED
 
 		GodotProfileZoneGrouped(_physics_zone, "physics_process");
-		if (OS::get_singleton()->get_main_loop()->physics_process(physics_step * time_scale)) {
+		const uint64_t phys_script_begin = track_timings ? OS::get_singleton()->get_ticks_usec() : 0;
+		const bool phys_exit = OS::get_singleton()->get_main_loop()->physics_process(physics_step * time_scale);
+		if (track_timings) {
+			timings.phys_script_usec += OS::get_singleton()->get_ticks_usec() - phys_script_begin;
+		}
+		if (phys_exit) {
 #ifndef PHYSICS_3D_DISABLED
 			PhysicsServer3D::get_singleton()->end_sync();
 #endif // PHYSICS_3D_DISABLED
@@ -5287,8 +5299,12 @@ bool Main::iteration() {
 
 #ifndef PHYSICS_3D_DISABLED
 		GodotProfileZoneGrouped(_profile_zone, "3D physics");
+		const uint64_t jolt_step_begin = track_timings ? OS::get_singleton()->get_ticks_usec() : 0;
 		PhysicsServer3D::get_singleton()->end_sync();
 		PhysicsServer3D::get_singleton()->step(physics_step * time_scale);
+		if (track_timings) {
+			timings.phys_jolt_usec += OS::get_singleton()->get_ticks_usec() - jolt_step_begin;
+		}
 #endif // PHYSICS_3D_DISABLED
 
 #ifndef PHYSICS_2D_DISABLED
@@ -5319,6 +5335,9 @@ bool Main::iteration() {
 		exit = true;
 	}
 	message_queue->flush();
+	if (track_timings) {
+		timings.process_usec = OS::get_singleton()->get_ticks_usec() - process_begin;
+	}
 
 #ifndef NAVIGATION_2D_DISABLED
 	GodotProfileZoneGrouped(_profile_zone, "process 2D navigation");
@@ -5329,6 +5348,7 @@ bool Main::iteration() {
 	NavigationServer3D::get_singleton()->process(process_step * time_scale);
 #endif // NAVIGATION_3D_DISABLED
 
+	const uint64_t render_begin = track_timings ? OS::get_singleton()->get_ticks_usec() : 0;
 	GodotProfileZoneGrouped(_profile_zone, "RenderingServer::sync");
 	RenderingServer::get_singleton()->sync(); //sync if still drawing from previous frames.
 
@@ -5356,6 +5376,11 @@ bool Main::iteration() {
 		}
 	}
 
+	const uint64_t render_end = track_timings ? OS::get_singleton()->get_ticks_usec() : 0;
+	if (track_timings) {
+		timings.render_usec = render_end - render_begin;
+	}
+
 	process_ticks = OS::get_singleton()->get_ticks_usec() - process_begin;
 	process_max = MAX(process_ticks, process_max);
 	uint64_t frame_time = OS::get_singleton()->get_ticks_usec() - ticks;
@@ -5370,6 +5395,10 @@ bool Main::iteration() {
 
 	GodotProfileZoneGrouped(_profile_zone, "AudioServer::update");
 	AudioServer::get_singleton()->update();
+	if (track_timings) {
+		timings.tail_usec = OS::get_singleton()->get_ticks_usec() - render_end;
+		last_frame_timings = timings;
+	}
 
 	if (EngineDebugger::is_active()) {
 		EngineDebugger::get_singleton()->iteration(frame_time, process_ticks, physics_process_ticks, physics_step);

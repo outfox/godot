@@ -1,5 +1,11 @@
 if (typeof DedicatedWorkerGlobalScope !== 'undefined' && self instanceof DedicatedWorkerGlobalScope) {
 	self.addEventListener('message', async function (event) {
+		if (event.data?.['godotWebGPUDestroy']) {
+			event.stopImmediatePropagation();
+			Module['preinitializedWebGPUDevice']?.destroy();
+			delete Module['preinitializedWebGPUDevice'];
+			return;
+		}
 		const port = event.data?.['godotWebGPU'];
 		if (!port) {
 			return;

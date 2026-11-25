@@ -50,9 +50,14 @@
 // Guards the prewarm queue and every WGPrewarm: results arrive on the device thread, which may not be rendering.
 static Mutex prewarm_mutex;
 static uint32_t pending_async_prewarms = 0;
+static uint32_t in_flight_gpu_frames = 0;
 static RenderingDeviceDriverWebGPU *active_prewarm_driver = nullptr;
 // Cap concurrent async pipeline compiles to avoid exhausting browser GPU-process compiler memory (Firefox DXC).
-static constexpr uint32_t MAX_INFLIGHT_PREWARMS = 4;
+static constexpr uint32_t MAX_INFLIGHT_PREWARMS = 16;
+static constexpr uint32_t MAX_INFLIGHT_PREWARMS_FIREFOX = 4;
+static uint32_t max_inflight_prewarms = MAX_INFLIGHT_PREWARMS;
+// Cap presented frames queued ahead of the GPU so input cannot drift behind rendered frames.
+static constexpr uint32_t MAX_INFLIGHT_GPU_FRAMES = 2;
 #endif
 #include <cstdio>
 #include <cstdlib>
@@ -84,7 +89,15 @@ static constexpr WGPUCallbackMode WEBGPU_CALLBACK_MODE = WGPUCallbackMode_AllowP
 // does NOT discriminate the two (both define WGPU_STRLEN), so provide both
 // signatures as overloads and let the assignment to the port's own
 // WGPUQueueWorkDoneCallback typedef select the matching one.
-static void _fence_work_done_body(void *p_userdata1) {
+static void _fence_work_done_body(void *p_userdata1, void *p_userdata2) {
+#ifdef WEB_ENABLED
+	if (p_userdata2) {
+		MutexLock lock(prewarm_mutex);
+		if (active_prewarm_driver == p_userdata2 && in_flight_gpu_frames > 0) {
+			in_flight_gpu_frames--;
+		}
+	}
+#endif
 	WGFence *fence = (WGFence *)p_userdata1;
 	if (!fence) {
 		return;
@@ -95,11 +108,11 @@ static void _fence_work_done_body(void *p_userdata1) {
 }
 
 [[maybe_unused]] static void _fence_work_done_callback(WGPUQueueWorkDoneStatus p_status, void *p_userdata1, void *p_userdata2) {
-	_fence_work_done_body(p_userdata1);
+	_fence_work_done_body(p_userdata1, p_userdata2);
 }
 
 [[maybe_unused]] static void _fence_work_done_callback(WGPUQueueWorkDoneStatus p_status, WGPUStringView p_message, void *p_userdata1, void *p_userdata2) {
-	_fence_work_done_body(p_userdata1);
+	_fence_work_done_body(p_userdata1, p_userdata2);
 }
 
 // Parse "@group(G[u]) @binding(B[u])" from a WGSL string.
@@ -208,7 +221,11 @@ RenderingDeviceDriverWebGPU::RenderingDeviceDriverWebGPU(RenderingContextDriverW
 		MutexLock lock(prewarm_mutex);
 		active_prewarm_driver = this;
 		pending_async_prewarms = 0;
+		in_flight_gpu_frames = 0;
+		const bool is_firefox = EM_ASM_INT({ return typeof navigator !== "undefined" && /firefox/i.test(navigator.userAgent || "") ? 1 : 0; }) != 0;
+		max_inflight_prewarms = is_firefox ? MAX_INFLIGHT_PREWARMS_FIREFOX : MAX_INFLIGHT_PREWARMS;
 	}
+	print_verbose(vformat("WebGPU: max_inflight_prewarms=%d", (int)max_inflight_prewarms));
 #endif
 }
 
@@ -221,6 +238,7 @@ RenderingDeviceDriverWebGPU::~RenderingDeviceDriverWebGPU() {
 		}
 		prewarm_queue.clear();
 		pending_async_prewarms = 0;
+		in_flight_gpu_frames = 0;
 	}
 #endif
 	for (const KeyValue<LayoutKey, WGPUPipelineLayout> &kv : pipeline_layout_cache) {
@@ -2674,10 +2692,16 @@ Error RenderingDeviceDriverWebGPU::command_queue_execute_and_present(CommandQueu
 			// emdawnwebgpu changed the callback shape again.
 			cb.callback = _fence_work_done_callback;
 			cb.userdata1 = fence;
-			cb.userdata2 = nullptr;
 #ifdef WEB_ENABLED
+			const bool track_frame = p_swap_chains.size() > 0;
+			if (track_frame) {
+				MutexLock lock(prewarm_mutex);
+				in_flight_gpu_frames++;
+			}
+			cb.userdata2 = track_frame ? this : nullptr;
 			cb.mode = WGPUCallbackMode_AllowSpontaneous;
 #else
+			cb.userdata2 = nullptr;
 			cb.mode = WGPUCallbackMode_WaitAnyOnly;
 #endif
 			fence->future = wgpuQueueOnSubmittedWorkDone(queue, cb);
@@ -5764,6 +5788,19 @@ bool RenderingDeviceDriverWebGPU::has_pending_pipelines() {
 #endif
 }
 
+bool RenderingDeviceDriverWebGPU::is_gpu_queue_full() {
+#ifdef WEB_ENABLED
+	WGPUInstance inst = context_driver ? context_driver->get_instance() : nullptr;
+	if (inst) {
+		wgpuInstanceProcessEvents(inst);
+	}
+	MutexLock lock(prewarm_mutex);
+	return in_flight_gpu_frames >= MAX_INFLIGHT_GPU_FRAMES;
+#else
+	return false;
+#endif
+}
+
 void RenderingDeviceDriverWebGPU::command_bind_push_constants(CommandBufferID p_cmd_buffer, ShaderID p_shader, uint32_t p_first_index, VectorView<uint32_t> p_data) {
 	WGCommandBuffer *cmd = (WGCommandBuffer *)(p_cmd_buffer.id);
 	ERR_FAIL_NULL(cmd);
@@ -6722,9 +6759,11 @@ WGPURenderPipeline RenderingDeviceDriverWebGPU::_get_clear_pipeline(const ClearP
 	desc.multisample.mask = 0xFFFFFFFFu;
 	desc.fragment = &fragment;
 
+	const uint64_t t0 = is_print_verbose_enabled() ? OS::get_singleton()->get_ticks_usec() : 0;
 	WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(device, &desc);
 	wgpuShaderModuleRelease(module);
 	ERR_FAIL_NULL_V_MSG(pipeline, nullptr, "WebGPU: failed to create the clear pipeline.");
+	print_verbose(vformat("WebGPU: compile clear-pipeline (ms=%d, colors=%d, ds=%d, %.1f ms)", (int)p_key.sample_count, (int)p_key.color_count, (int)p_key.depth_stencil_format, (OS::get_singleton()->get_ticks_usec() - t0) / 1000.0));
 	clear_pipelines.insert(p_key, pipeline);
 	return pipeline;
 }
@@ -7282,8 +7321,10 @@ WGPUShaderModule RenderingDeviceDriverWebGPU::_stage_module(WGShader *p_shader, 
 		// Label the module so Dawn error messages (and JS-side patch logs) identify it.
 		const CharString label = ("mod:" + p_shader->name + ":stg" + itos((int)p_stage)).utf8();
 		desc.label = { label.get_data(), WGPU_STRLEN };
+		const uint64_t t0 = is_print_verbose_enabled() ? OS::get_singleton()->get_ticks_usec() : 0;
 		module = wgpuDeviceCreateShaderModule(device, &desc);
 		ERR_FAIL_NULL_V_MSG(module, nullptr, vformat("WebGPU: wgpuDeviceCreateShaderModule failed for stage %d.", (int)p_stage));
+		print_verbose(vformat("WebGPU: compile module '%s' (%.1f ms)", String::utf8(label.get_data()), (OS::get_singleton()->get_ticks_usec() - t0) / 1000.0));
 		p_shader->stage_wgsl[p_stage] = CharString();
 	}
 	return module;
@@ -7296,6 +7337,7 @@ WGPUShaderModule RenderingDeviceDriverWebGPU::_create_module_with_spec_constants
 		VectorView<PipelineSpecializationConstant> p_constants,
 		ShaderStage p_stage,
 		const WGShader *p_shader) {
+	const uint64_t t0 = is_print_verbose_enabled() ? OS::get_singleton()->get_ticks_usec() : 0;
 	PackedByteArray patched = _patch_spirv_spec_constants(p_spirv, p_constants);
 
 	// Reuse the container compiler and its shader cache for specialized modules.
@@ -7325,7 +7367,9 @@ WGPUShaderModule RenderingDeviceDriverWebGPU::_create_module_with_spec_constants
 	CharString _spec_label_cs = _spec_label.utf8();
 	desc.label = { _spec_label_cs.get_data(), WGPU_STRLEN };
 
-	return wgpuDeviceCreateShaderModule(device, &desc);
+	WGPUShaderModule mod = wgpuDeviceCreateShaderModule(device, &desc);
+	print_verbose(vformat("WebGPU: compile spec-module '%s' (%s, %.1f ms)", _spec_label, p_shader->name, (OS::get_singleton()->get_ticks_usec() - t0) / 1000.0));
+	return mod;
 }
 
 RDD::PipelineID RenderingDeviceDriverWebGPU::render_pipeline_create(
@@ -7397,10 +7441,13 @@ void RenderingDeviceDriverWebGPU::_prewarm_render_arrived(WGPUCreatePipelineAsyn
 	WGPrewarm *prewarm = (WGPrewarm *)p_userdata1;
 	const uintptr_t slot = (uintptr_t)p_userdata2;
 	bool log_failure = false;
-	String failed_label;
+	String done_label;
+	uint64_t start_usec = 0;
 	RenderingDeviceDriverWebGPU *driver = nullptr;
 	{
 		MutexLock lock(prewarm_mutex);
+		done_label = prewarm->label;
+		start_usec = prewarm->start_usec;
 		prewarm->pending--;
 		if (!prewarm->abandoned) {
 			if (pending_async_prewarms > 0) {
@@ -7411,7 +7458,6 @@ void RenderingDeviceDriverWebGPU::_prewarm_render_arrived(WGPUCreatePipelineAsyn
 				p_pipeline = nullptr;
 			} else {
 				log_failure = true;
-				failed_label = prewarm->label;
 				if (slot == 0) {
 					prewarm->failed = true;
 				}
@@ -7433,7 +7479,9 @@ void RenderingDeviceDriverWebGPU::_prewarm_render_arrived(WGPUCreatePipelineAsyn
 				error_msg = String::utf8(p_message.data, (int)p_message.length);
 			}
 		}
-		ERR_PRINT(vformat("WebGPU: Async render pipeline '%s' (slot %d) failed (status=%d): %s", failed_label, (int)slot, (int)p_status, error_msg));
+		ERR_PRINT(vformat("WebGPU: Async render pipeline '%s' (slot %d) failed (status=%d): %s", done_label, (int)slot, (int)p_status, error_msg));
+	} else {
+		print_verbose(vformat("WebGPU: compile render-async done %s (slot=%d, %.1f ms)", done_label, (int)slot, (OS::get_singleton()->get_ticks_usec() - start_usec) / 1000.0));
 	}
 	if (driver) {
 		driver->_drain_prewarm();
@@ -7460,7 +7508,7 @@ void RenderingDeviceDriverWebGPU::_drain_prewarm() {
 		WGPipelineWrapper *pw = nullptr;
 		{
 			MutexLock lock(prewarm_mutex);
-			if (pending_async_prewarms >= MAX_INFLIGHT_PREWARMS || prewarm_queue.is_empty()) {
+			if (pending_async_prewarms >= max_inflight_prewarms || prewarm_queue.is_empty()) {
 				break;
 			}
 			pw = prewarm_queue[0];
@@ -8096,14 +8144,18 @@ RDD::PipelineID RenderingDeviceDriverWebGPU::_render_pipeline_create_now(
 		info.callback = _prewarm_render_arrived;
 		info.userdata1 = prewarm_request;
 		const uint32_t count = is_strip ? 2 : 1;
+		const String async_label = vformat("%s (ms=%d, targets=%d, ds=%d, vbufs=%d, vconsts=%d, fconsts=%d)", _pipeline_label_str, (int)multisample.count, (int)color_target_count, ds_ptr ? (int)ds.format : 0, (int)vb_layouts.size(), (int)vertex_constants.size(), (int)frag_constants.size());
+		const uint64_t start_usec = is_print_verbose_enabled() ? OS::get_singleton()->get_ticks_usec() : 0;
 		{
 			MutexLock lock(prewarm_mutex);
-			prewarm_request->label = vformat("%s (ms=%d, targets=%d, ds=%d, vbufs=%d, vconsts=%d, fconsts=%d)", _pipeline_label_str, (int)multisample.count, (int)color_target_count, ds_ptr ? (int)ds.format : 0, (int)vb_layouts.size(), (int)vertex_constants.size(), (int)frag_constants.size());
+			prewarm_request->label = async_label;
+			prewarm_request->start_usec = start_usec;
 			prewarm_request->is_strip = is_strip;
 			prewarm_request->stencil_reference = p_depth_stencil_state.front_op.reference;
 			prewarm_request->pending = count;
 			pending_async_prewarms += count;
 		}
+		print_verbose(vformat("WebGPU: compile render-async start %s (variants=%d)", async_label, (int)count));
 		// Strips also get their Uint16 variant, like below.
 		for (uint32_t i = 0; i < count; i++) {
 			info.userdata2 = (void *)(uintptr_t)i;
@@ -8113,7 +8165,9 @@ RDD::PipelineID RenderingDeviceDriverWebGPU::_render_pipeline_create_now(
 		return PipelineID();
 	}
 #endif
+	const uint64_t t0 = is_print_verbose_enabled() ? OS::get_singleton()->get_ticks_usec() : 0;
 	WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(device, &desc);
+	print_verbose(vformat("WebGPU: compile render-sync %s (ms=%d, targets=%d, ds=%d, %.1f ms)", _pipeline_label_str, (int)multisample.count, (int)color_target_count, ds_ptr ? (int)ds.format : 0, (OS::get_singleton()->get_ticks_usec() - t0) / 1000.0));
 	if (!pipeline) {
 		if (specialized_vertex) {
 			wgpuShaderModuleRelease(specialized_vertex);
@@ -8362,7 +8416,9 @@ RDD::PipelineID RenderingDeviceDriverWebGPU::_compute_pipeline_create_now(Shader
 		desc.compute.constants = compute_constants.ptr();
 	}
 
+	const uint64_t t0 = is_print_verbose_enabled() ? OS::get_singleton()->get_ticks_usec() : 0;
 	WGPUComputePipeline pipeline = wgpuDeviceCreateComputePipeline(device, &desc);
+	print_verbose(vformat("WebGPU: compile compute-sync '%s' (consts=%d, %.1f ms)", shader->name, (int)compute_constants.size(), (OS::get_singleton()->get_ticks_usec() - t0) / 1000.0));
 	if (!pipeline) {
 		if (specialized_compute) {
 			wgpuShaderModuleRelease(specialized_compute);

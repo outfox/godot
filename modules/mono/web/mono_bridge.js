@@ -138,6 +138,9 @@ Godot['prepareWorkerWebGPU'] = async (module, canvas) => {
 		const attached = reply();
 		port1.postMessage(offscreen, [offscreen]);
 		await Promise.race([attached, failed]);
+		if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+			window.addEventListener('pagehide', () => worker.postMessage({ 'godotWebGPUDestroy': true }), { once: true });
+		}
 	} catch (err) {
 		port1.postMessage(null);
 		throw err;

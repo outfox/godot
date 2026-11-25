@@ -329,6 +329,10 @@ uint16_t SceneShaderForwardClustered::ShaderData::_get_shader_version(PipelineVe
 }
 
 void SceneShaderForwardClustered::ShaderData::_create_pipeline(PipelineKey p_pipeline_key) {
+	print_verbose(vformat("WebGPU: scene pipeline path='%s' ver=%d flags=0x%x cull=%d prim=%d spec=0x%x",
+			path, (int)p_pipeline_key.version, (uint32_t)p_pipeline_key.color_pass_flags,
+			(int)p_pipeline_key.cull_mode, (int)p_pipeline_key.primitive_type,
+			(uint32_t)p_pipeline_key.shader_specialization.packed_0));
 #if PRINT_PIPELINE_COMPILATION_KEYS
 	print_line(
 			"HASH:", p_pipeline_key.hash(),
