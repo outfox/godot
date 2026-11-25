@@ -2570,17 +2570,24 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 
 		} else {
 #ifdef WEB_ENABLED
-			// Always on: a new variant of every lit pipeline would stall the browser when a projector first lights up.
+			// Pinned like Forward+'s clustered lighting: per-object light, probe, projector or soft-shadow changes
+			// would otherwise compile a new pipeline mid-game. The shader stops at the first empty (0xFF) slot.
 			pipeline_specialization.use_light_projector = true;
+			pipeline_specialization.use_light_soft_shadows = true;
+			pipeline_specialization.omni_lights = SceneShaderForwardMobile::SHADER_COUNT_MULTIPLE;
+			pipeline_specialization.spot_lights = SceneShaderForwardMobile::SHADER_COUNT_MULTIPLE;
+			pipeline_specialization.area_lights = SceneShaderForwardMobile::SHADER_COUNT_MULTIPLE;
+			pipeline_specialization.reflection_probes = SceneShaderForwardMobile::SHADER_COUNT_MULTIPLE;
+			pipeline_specialization.decals = true;
 #else
 			pipeline_specialization.use_light_projector = inst->use_projector;
-#endif
 			pipeline_specialization.use_light_soft_shadows = inst->use_soft_shadow;
 			pipeline_specialization.omni_lights = SceneShaderForwardMobile::shader_count_for(inst->omni_light_count);
 			pipeline_specialization.spot_lights = SceneShaderForwardMobile::shader_count_for(inst->spot_light_count);
 			pipeline_specialization.area_lights = SceneShaderForwardMobile::shader_count_for(inst->area_light_count);
 			pipeline_specialization.reflection_probes = SceneShaderForwardMobile::shader_count_for(inst->reflection_probe_count);
 			pipeline_specialization.decals = inst->decals_count > 0;
+#endif
 			pipeline_specialization.use_lightmap_specular = element_info.uses_lightmap_specular;
 
 #ifdef DEBUG_ENABLED

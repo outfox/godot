@@ -546,7 +546,7 @@ void vertex_shader(in vec3 vertex,
 	uvec2 omni_light_indices = instances.data[instance_index].omni_lights;
 	for (uint i = 0; i < omni_light_count; i++) {
 		uint light_index = (i > 3) ? ((omni_light_indices.y >> ((i - 4) * 8)) & 0xFF) : ((omni_light_indices.x >> (i * 8)) & 0xFF);
-		if (i > 0 && light_index == 0xFF) {
+		if (light_index == 0xFF) {
 			break;
 		}
 
@@ -557,7 +557,7 @@ void vertex_shader(in vec3 vertex,
 	uvec2 spot_light_indices = instances.data[instance_index].spot_lights;
 	for (uint i = 0; i < spot_light_count; i++) {
 		uint light_index = (i > 3) ? ((spot_light_indices.y >> ((i - 4) * 8)) & 0xFF) : ((spot_light_indices.x >> (i * 8)) & 0xFF);
-		if (i > 0 && light_index == 0xFF) {
+		if (light_index == 0xFF) {
 			break;
 		}
 
@@ -2355,7 +2355,7 @@ void main() {
 #endif
 	for (uint i = 0; i < omni_light_count; i++) {
 		uint light_index = (i > 3) ? ((omni_indices.y >> ((i - 4) * 8)) & 0xFF) : ((omni_indices.x >> (i * 8)) & 0xFF);
-		if (i > 0 && light_index == 0xFF) {
+		if (light_index == 0xFF) {
 			break;
 		}
 
@@ -2391,7 +2391,7 @@ void main() {
 #endif
 	for (uint i = 0; i < spot_light_count; i++) {
 		uint light_index = (i > 3) ? ((spot_indices.y >> ((i - 4) * 8)) & 0xFF) : ((spot_indices.x >> (i * 8)) & 0xFF);
-		if (i > 0 && light_index == 0xFF) {
+		if (light_index == 0xFF) {
 			break;
 		}
 
@@ -2427,7 +2427,7 @@ void main() {
 #endif
 	for (uint i = 0; i < area_light_count; i++) {
 		uint light_index = (i > 3) ? ((area_indices.y >> ((i - 4) * 8)) & 0xFF) : ((area_indices.x >> (i * 8)) & 0xFF);
-		if (i > 0 && light_index == 0xFF) {
+		if (light_index == 0xFF) {
 			break;
 		}
 
