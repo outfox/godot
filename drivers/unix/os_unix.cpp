@@ -363,10 +363,6 @@ uint64_t OS_Unix::get_ticks_usec() const {
 	return longtime;
 }
 
-uint64_t OS_Unix::monotonic_usec_to_ticks_usec(uint64_t p_monotonic_usec) const {
-	return p_monotonic_usec > _clock_start ? p_monotonic_usec - _clock_start : 0;
-}
-
 Dictionary OS_Unix::get_memory_info() const {
 	Dictionary meminfo;
 

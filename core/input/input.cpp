@@ -938,7 +938,6 @@ void Input::_parse_input_event_impl(const Ref<InputEvent> &p_event, bool p_is_em
 			touch_event->set_double_tap(mb->is_double_click());
 			touch_event->set_window_id(mb->get_window_id());
 			touch_event->set_device(InputEvent::DEVICE_ID_EMULATION);
-			touch_event->set_timestamp_usec(mb->get_timestamp_usec());
 			_THREAD_SAFE_UNLOCK_
 			event_dispatch_function(touch_event);
 			_THREAD_SAFE_LOCK_
@@ -969,7 +968,6 @@ void Input::_parse_input_event_impl(const Ref<InputEvent> &p_event, bool p_is_em
 			drag_event->set_velocity(get_last_mouse_velocity());
 			drag_event->set_screen_velocity(get_last_mouse_screen_velocity());
 			drag_event->set_device(InputEvent::DEVICE_ID_EMULATION);
-			drag_event->set_timestamp_usec(mm->get_timestamp_usec());
 
 			_THREAD_SAFE_UNLOCK_
 			event_dispatch_function(drag_event);
@@ -1015,7 +1013,6 @@ void Input::_parse_input_event_impl(const Ref<InputEvent> &p_event, bool p_is_em
 				button_event->set_button_index(MouseButton::LEFT);
 				button_event->set_double_click(st->is_double_tap());
 				button_event->set_window_id(st->get_window_id());
-				button_event->set_timestamp_usec(st->get_timestamp_usec());
 
 				BitField<MouseButtonMask> ev_bm = mouse_button_mask;
 				if (st->is_pressed()) {
@@ -1054,7 +1051,6 @@ void Input::_parse_input_event_impl(const Ref<InputEvent> &p_event, bool p_is_em
 			motion_event->set_screen_velocity(sd->get_screen_velocity());
 			motion_event->set_button_mask(mouse_button_mask);
 			motion_event->set_window_id(sd->get_window_id());
-			motion_event->set_timestamp_usec(sd->get_timestamp_usec());
 
 			_parse_input_event_impl(motion_event, true);
 		}

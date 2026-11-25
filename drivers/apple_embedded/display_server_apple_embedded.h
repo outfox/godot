@@ -131,13 +131,13 @@ public:
 
 	// MARK: Touches and Apple Pencil
 
-	void touch_press(int p_idx, int p_x, int p_y, bool p_pressed, bool p_double_click, bool p_long_press, double p_timestamp_sec = 0.0);
-	void touch_drag(int p_idx, int p_prev_x, int p_prev_y, int p_x, int p_y, float p_pressure, Vector2 p_tilt, double p_timestamp_sec = 0.0);
-	void touches_canceled(int p_idx, double p_timestamp_sec = 0.0);
+	void touch_press(int p_idx, int p_x, int p_y, bool p_pressed, bool p_double_click, bool p_long_press);
+	void touch_drag(int p_idx, int p_prev_x, int p_prev_y, int p_x, int p_y, float p_pressure, Vector2 p_tilt);
+	void touches_canceled(int p_idx);
 
 	// MARK: Keyboard
 
-	void key(Key p_key, char32_t p_char, Key p_unshifted, Key p_physical, NSInteger p_modifier, bool p_pressed, KeyLocation p_location, double p_timestamp_sec = 0.0);
+	void key(Key p_key, char32_t p_char, Key p_unshifted, Key p_physical, NSInteger p_modifier, bool p_pressed, KeyLocation p_location);
 	bool is_keyboard_active() const;
 
 	// MARK: Motion

@@ -70,11 +70,11 @@ extern char *godot_js_dylink_thread_load(int p_index, const char *p_name, const 
 #endif
 
 // Input
-extern void godot_js_input_mouse_button_cb(int (*p_callback)(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers, double p_timestamp_ms));
-extern void godot_js_input_mouse_move_cb(void (*p_callback)(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure, double p_timestamp_ms));
-extern void godot_js_input_mouse_wheel_cb(int (*p_callback)(int p_delta_mode, double p_delta_x, double p_delta_y, double p_timestamp_ms));
-extern void godot_js_input_touch_cb(void (*p_callback)(int p_type, int p_count, double p_timestamp_ms), uint32_t *r_identifiers, double *r_coords);
-extern void godot_js_input_key_cb(void (*p_callback)(int p_type, int p_repeat, int p_modifiers, double p_timestamp_ms), char r_code[32], char r_key[32]);
+extern void godot_js_input_mouse_button_cb(int (*p_callback)(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers));
+extern void godot_js_input_mouse_move_cb(void (*p_callback)(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure));
+extern void godot_js_input_mouse_wheel_cb(int (*p_callback)(int p_delta_mode, double p_delta_x, double p_delta_y));
+extern void godot_js_input_touch_cb(void (*p_callback)(int p_type, int p_count), uint32_t *r_identifiers, double *r_coords);
+extern void godot_js_input_key_cb(void (*p_callback)(int p_type, int p_repeat, int p_modifiers), char r_code[32], char r_key[32]);
 extern void godot_js_input_vibrate_handheld(int p_duration_ms);
 
 extern void godot_js_set_ime_active(int p_active);
