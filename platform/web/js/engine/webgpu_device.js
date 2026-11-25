@@ -41,7 +41,13 @@ function godotRequestWebGPUDevice(adapterOptions, deviceDescriptor) {
 			}
 		}
 		return adapter.requestDevice(desc).then(function (device) {
-			device['godotAdapterInfo'] = adapter.info || {};
+			const adapterInfo = adapter.info || {};
+			device['godotAdapterInfo'] = adapterInfo;
+			const parts = [adapterInfo.vendor, adapterInfo.architecture, adapterInfo.device, adapterInfo.description].filter(Boolean);
+			if (adapter.isFallbackAdapter || adapterInfo.isFallbackAdapter) {
+				parts.push('fallback');
+			}
+			console.info(`[Godot] WebGPU adapter: ${parts.length ? parts.join(' / ') : 'unknown'}`); // eslint-disable-line no-console
 			// Monitor device loss (non-blocking — just log).
 			device.lost.then(function (info) {
 				const reason = info.reason || 'unknown';
