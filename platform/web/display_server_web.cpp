@@ -71,8 +71,11 @@ DisplayServerWeb *DisplayServerWeb::get_singleton() {
 
 // Window (canvas)
 bool DisplayServerWeb::check_size_force_redraw() {
-	bool size_changed = godot_js_display_size_update() != 0;
-	if (size_changed && rect_changed_callback.is_valid()) {
+	if (godot_js_display_size_update() != 0) {
+		pending_size_sync = true;
+	}
+	if (pending_size_sync && rect_changed_callback.is_valid()) {
+		pending_size_sync = false;
 		Size2i window_size = window_get_size();
 		Variant size = Rect2i(Point2i(), window_size); // TODO use window_get_position if implemented.
 		rect_changed_callback.call(size);
@@ -83,8 +86,9 @@ bool DisplayServerWeb::check_size_force_redraw() {
 			rendering_context->window_set_size(DisplayServerEnums::MAIN_WINDOW_ID, window_size.x, window_size.y);
 		}
 #endif
+		return true;
 	}
-	return size_changed;
+	return false;
 }
 
 void DisplayServerWeb::fullscreen_change_callback(int p_fullscreen) {
@@ -1458,6 +1462,7 @@ Size2i DisplayServerWeb::window_get_min_size(DisplayServerEnums::WindowID p_wind
 
 void DisplayServerWeb::window_set_size(const Size2i p_size, DisplayServerEnums::WindowID p_window) {
 	godot_js_display_desired_size_set(p_size.x, p_size.y);
+	pending_size_sync = true;
 }
 
 Size2i DisplayServerWeb::window_get_size(DisplayServerEnums::WindowID p_window) const {

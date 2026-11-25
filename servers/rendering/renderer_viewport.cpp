@@ -979,8 +979,10 @@ void RendererViewport::draw_viewports(bool p_swap_buffers) {
 	RENDER_TIMESTAMP("< Render Viewports");
 
 	GodotProfileZoneGrouped(_profile_zone, "rasterizer->blit_render_targets_to_screen");
-	// A frame that had draws skipped (web, pipelines still compiling) isn't shown; the previous one stays on screen.
-	if (p_swap_buffers && !blit_to_screen_list.is_empty() && skipped_draws == RSG::pipeline_skipped_draws) {
+	// Hide incomplete initial frames while boot pipelines compile; once live, keep presenting so late probe/SDFGI
+	// compiles never freeze the screen or pile up unpresented frames in the GPU queue.
+	if (p_swap_buffers && !blit_to_screen_list.is_empty() && (has_presented_screen || skipped_draws == RSG::pipeline_skipped_draws)) {
+		has_presented_screen = true;
 		for (const KeyValue<int, Vector<RenderingServerTypes::BlitToScreen>> &E : blit_to_screen_list) {
 			RSG::rasterizer->blit_render_targets_to_screen(E.key, E.value.ptr(), E.value.size());
 		}

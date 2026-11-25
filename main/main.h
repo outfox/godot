@@ -82,6 +82,15 @@ public:
 	static bool iteration();
 	static void force_redraw();
 
+	struct FrameTimings {
+		uint64_t phys_script_usec = 0;
+		uint64_t phys_jolt_usec = 0;
+		uint64_t process_usec = 0;
+		uint64_t render_usec = 0;
+		uint64_t tail_usec = 0;
+	};
+	static FrameTimings last_frame_timings;
+
 	static bool is_iterating();
 
 	static void cleanup(bool p_force = false);

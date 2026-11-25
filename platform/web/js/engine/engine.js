@@ -418,6 +418,13 @@ const Engine = (function () {
 					const msg = (err && err.message) ? err.message : String(err);
 					console.error(`[Godot] WebGPU uncaptured error: ${kind}: ${msg}`); // eslint-disable-line no-console
 				});
+				if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+					window.addEventListener('pagehide', function () {
+						if (typeof device.destroy === 'function') {
+							device.destroy();
+						}
+					}, { once: true });
+				}
 				return device;
 			});
 		});

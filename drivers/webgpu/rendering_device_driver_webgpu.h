@@ -540,6 +540,7 @@ public:
 	virtual void pipeline_free(PipelineID p_pipeline) override final;
 	virtual bool pipeline_is_ready(PipelineID p_pipeline) override final;
 	virtual bool has_pending_pipelines() override final;
+	virtual bool is_gpu_queue_full() override final;
 	/// Write push constant data. Emulated via a ring buffer (WebGPU has no push constants).
 	virtual void command_bind_push_constants(CommandBufferID p_cmd_buffer, ShaderID p_shader, uint32_t p_first_index, VectorView<uint32_t> p_data) override final;
 	/// Stub — WebGPU has no pipeline cache. Returns true.

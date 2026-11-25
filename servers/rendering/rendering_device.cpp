@@ -5311,6 +5311,10 @@ bool RenderingDevice::has_pending_pipelines() {
 	return driver && driver->has_pending_pipelines();
 }
 
+bool RenderingDevice::is_gpu_queue_full() {
+	return driver && driver->is_gpu_queue_full();
+}
+
 RID RenderingDevice::compute_pipeline_create(RID p_shader, const Vector<PipelineSpecializationConstant> &p_specialization_constants) {
 	Shader *shader;
 

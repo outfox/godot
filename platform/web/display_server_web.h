@@ -116,6 +116,7 @@ private:
 	int key_event_pos = 0;
 
 	bool swap_cancel_ok = false;
+	bool pending_size_sync = true;
 	NativeMenu *native_menu = nullptr;
 
 	int gamepad_count = 0;

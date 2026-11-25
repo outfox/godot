@@ -1290,6 +1290,7 @@ public:
 	bool render_pipeline_is_valid(RID p_pipeline);
 	bool render_pipeline_is_ready(RID p_pipeline);
 	bool has_pending_pipelines();
+	bool is_gpu_queue_full();
 
 	RID compute_pipeline_create(RID p_shader, const Vector<PipelineSpecializationConstant> &p_specialization_constants = Vector<PipelineSpecializationConstant>());
 	bool compute_pipeline_is_valid(RID p_pipeline);

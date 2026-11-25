@@ -659,6 +659,7 @@ public:
 	virtual void pipeline_free(PipelineID p_pipeline) = 0;
 	virtual bool pipeline_is_ready(PipelineID p_pipeline) { return true; }
 	virtual bool has_pending_pipelines() { return false; }
+	virtual bool is_gpu_queue_full() { return false; }
 
 	// ----- BINDING -----
 

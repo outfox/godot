@@ -243,6 +243,7 @@ struct WGFramebuffer {
 struct WGPrewarm {
 	WGPURenderPipeline render_results[2] = {}; // Strips have a second, Uint16 variant at index 1.
 	String label;
+	uint64_t start_usec = 0;
 	uint32_t stencil_reference = 0;
 	uint32_t pending = 0;
 	bool is_strip = false;
