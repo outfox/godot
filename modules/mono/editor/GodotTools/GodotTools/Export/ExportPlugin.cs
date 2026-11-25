@@ -167,9 +167,73 @@ namespace GodotTools.Export
             }
         }
 
+        private string? _shaderBakeTarget;
+
+        // Cached scene conversions skip material discovery. Each target needs its own traversal.
+        public override bool _BeginCustomizeResources(EditorExportPlatform platform, string[] features) => _shaderBakeTarget != null;
+        public override ulong _GetCustomizationConfigurationHash() => _shaderBakeTarget?.Hash() ?? 0;
+        public override Resource _CustomizeResource(Resource resource, string path) => null!;
+
+        private void PackShaderBakes(string[] features, string path, string directory)
+        {
+            string? method = System.Environment.GetEnvironmentVariable("TWODOG_SHADER_BAKE_METHOD");
+            if (method != null)
+            {
+                var driver = GetExportPreset().GetProjectSetting("rendering/rendering_device/driver").AsString();
+                if (!features.Contains("shader_baker") || (driver == "metal" && !OperatingSystem.IsMacOS()) ||
+                    (driver == "d3d12" && !OperatingSystem.IsWindows()))
+                {
+                    string reason = !features.Contains("shader_baker") ? "the preset disables baking" : $"this host cannot bake {driver}";
+                    System.IO.File.WriteAllText(path + ".skip", $"Skipping shader baking for {GetExportPreset().GetPresetName()}: {reason}.");
+                    return;
+                }
+                _shaderBakeTarget = $"{GetExportPlatform().GetOsName()}/{driver}/{method}/{GetExportPreset().GetPresetName()}";
+                // Only this disposable shader archive sees the override. The final pack keeps the project's defaults.
+                if (GetExportPlatform().GetOsName() == "Web")
+                {
+                    foreach (var property in ProjectSettings.Singleton.GetPropertyList())
+                    {
+                        string key = property["name"].AsString();
+                        if (key == "rendering/renderer/rendering_method" || key.StartsWith("rendering/renderer/rendering_method.", StringComparison.Ordinal))
+                            ProjectSettings.SetSetting(key, method);
+                    }
+                }
+                return;
+            }
+
+            var seen = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            foreach (string archive in System.IO.Directory.GetFiles(directory, "*.zip").OrderBy(p => p, StringComparer.Ordinal))
+            {
+                long added = 0;
+                using var zip = System.IO.Compression.ZipFile.OpenRead(archive);
+                foreach (var entry in zip.Entries)
+                {
+                    if (!entry.FullName.StartsWith(".godot/shader_cache/", StringComparison.Ordinal) ||
+                        !entry.FullName.EndsWith(".cache", StringComparison.Ordinal)) continue;
+                    using var stream = entry.Open();
+                    byte[] bytes = new byte[checked((int)entry.Length)];
+                    stream.ReadExactly(bytes);
+                    byte[] hash = SHA256.HashData(bytes);
+                    if (seen.TryGetValue(entry.FullName, out var previous))
+                    {
+                        if (!previous.SequenceEqual(hash)) throw new InvalidDataException($"Conflicting shader cache: {entry.FullName}");
+                        continue;
+                    }
+                    seen.Add(entry.FullName, hash);
+                    AddFile("res://" + entry.FullName, bytes, remap: false);
+                    added += bytes.Length;
+                }
+                GD.Print($"2dog: {System.IO.Path.GetFileNameWithoutExtension(archive)} adds {added:N0} shader bytes.");
+            }
+            System.IO.File.WriteAllText(System.IO.Path.Combine(directory, "packed"), seen.Count.ToString(CultureInfo.InvariantCulture));
+        }
+
         private void _ExportBeginImpl(string[] features, bool isDebug, string path, long flags)
         {
             _ = flags; // Unused.
+            if (Godot.OS.GetCmdlineUserArgs().Contains("--2dog-host-pack") &&
+                System.Environment.GetEnvironmentVariable("TWODOG_SHADER_BAKE_DIR") is string directory)
+                PackShaderBakes(features, path, directory);
 
             if (!ProjectContainsDotNet())
                 return;
@@ -534,6 +598,7 @@ namespace GodotTools.Export
 
         public override void _ExportEnd()
         {
+            _shaderBakeTarget = null;
             base._ExportEnd();
 
             string aotTempDir = Path.Combine(Path.GetTempPath(), $"godot-aot-{System.Environment.ProcessId}");

@@ -102,12 +102,39 @@ TEST_CASE("[InputEvent] Test xformed_by") {
 	iemm1.instantiate();
 
 	iemm1->set_position(Vector2(0.0f, 0.0f));
+	iemm1->set_timestamp_usec(123456);
 	Transform2D transform;
 	transform = transform.translated(Vector2(2.0f, 3.0f));
 
 	Ref<InputEventMouseMotion> iemm2 = iemm1->xformed_by(transform);
 
 	CHECK(iemm2->get_position().is_equal_approx(Vector2(2.0f, 3.0f)));
+	CHECK(iemm2->get_timestamp_usec() == 123456);
+}
+
+TEST_CASE("[InputEvent] Test timestamp_usec") {
+	Ref<InputEventScreenTouch> st;
+	st.instantiate();
+	CHECK(st->get_timestamp_usec() == 0);
+
+	st->set_timestamp_usec(987654321);
+	CHECK(st->get_timestamp_usec() == 987654321);
+
+	Ref<InputEventScreenTouch> st_xformed = st->xformed_by(Transform2D());
+	CHECK(st_xformed->get_timestamp_usec() == 987654321);
+
+	Ref<InputEventScreenDrag> sd1, sd2;
+	sd1.instantiate();
+	sd2.instantiate();
+	sd1->set_timestamp_usec(1000);
+	sd2->set_timestamp_usec(2500);
+	CHECK(sd1->accumulate(sd2));
+	CHECK(sd1->get_timestamp_usec() == 2500);
+
+	Ref<InputEventScreenDrag> sd3;
+	sd3.instantiate();
+	CHECK(sd1->accumulate(sd3));
+	CHECK(sd1->get_timestamp_usec() == 2500);
 }
 
 } // namespace TestInputEvent

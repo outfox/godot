@@ -113,6 +113,8 @@ public:
 
 	virtual void delay_usec(uint32_t p_usec) const override;
 	virtual uint64_t get_ticks_usec() const override;
+	// 2dog: converts a platform monotonic timestamp in microseconds to the get_ticks_usec() epoch.
+	uint64_t monotonic_usec_to_ticks_usec(uint64_t p_monotonic_usec) const;
 
 	virtual Dictionary get_memory_info() const override;
 

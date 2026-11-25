@@ -53,6 +53,7 @@ class InputEvent : public Resource {
 	GDCLASS(InputEvent, Resource);
 
 	int device = 0;
+	uint64_t timestamp_usec = 0; // 2dog: OS event timestamp in Time::get_ticks_usec() epoch; 0 = unset.
 
 protected:
 	bool canceled = false;
@@ -68,6 +69,9 @@ public:
 
 	void set_device(int p_device);
 	int get_device() const;
+
+	void set_timestamp_usec(uint64_t p_timestamp_usec);
+	uint64_t get_timestamp_usec() const;
 
 	bool is_action(const StringName &p_action, bool p_exact_match = false) const;
 	bool is_action_pressed(const StringName &p_action, bool p_allow_echo = false, bool p_exact_match = false) const;

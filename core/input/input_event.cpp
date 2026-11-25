@@ -48,6 +48,14 @@ int InputEvent::get_device() const {
 	return device;
 }
 
+void InputEvent::set_timestamp_usec(uint64_t p_timestamp_usec) {
+	timestamp_usec = p_timestamp_usec;
+}
+
+uint64_t InputEvent::get_timestamp_usec() const {
+	return timestamp_usec;
+}
+
 bool InputEvent::is_action(const StringName &p_action, bool p_exact_match) const {
 	return InputMap::get_singleton()->event_is_action(Ref<InputEvent>(const_cast<InputEvent *>(this)), p_action, p_exact_match);
 }
@@ -115,6 +123,9 @@ bool InputEvent::is_action_type() const {
 void InputEvent::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_device", "device"), &InputEvent::set_device);
 	ClassDB::bind_method(D_METHOD("get_device"), &InputEvent::get_device);
+
+	ClassDB::bind_method(D_METHOD("set_timestamp_usec", "timestamp_usec"), &InputEvent::set_timestamp_usec);
+	ClassDB::bind_method(D_METHOD("get_timestamp_usec"), &InputEvent::get_timestamp_usec);
 
 	ClassDB::bind_method(D_METHOD("is_action", "action", "exact_match"), &InputEvent::is_action, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("is_action_pressed", "action", "allow_echo", "exact_match"), &InputEvent::is_action_pressed, DEFVAL(false), DEFVAL(false));
@@ -764,6 +775,7 @@ RequiredResult<InputEvent> InputEventMouseButton::xformed_by(const Transform2D &
 	mb.instantiate();
 
 	mb->set_device(get_device());
+	mb->set_timestamp_usec(get_timestamp_usec());
 	mb->set_window_id(get_window_id());
 	mb->set_modifiers_from_event(this);
 
@@ -983,6 +995,7 @@ RequiredResult<InputEvent> InputEventMouseMotion::xformed_by(const Transform2D &
 	mm.instantiate();
 
 	mm->set_device(get_device());
+	mm->set_timestamp_usec(get_timestamp_usec());
 	mm->set_window_id(get_window_id());
 
 	mm->set_modifiers_from_event(this);
@@ -1077,6 +1090,9 @@ bool InputEventMouseMotion::accumulate(const Ref<InputEvent> &p_event) {
 	set_screen_velocity(motion->get_screen_velocity());
 	relative += motion->get_relative();
 	screen_relative += motion->get_relative_screen_position();
+	if (motion->get_timestamp_usec() != 0) {
+		set_timestamp_usec(motion->get_timestamp_usec());
+	}
 
 	return true;
 }
@@ -1396,6 +1412,7 @@ RequiredResult<InputEvent> InputEventScreenTouch::xformed_by(const Transform2D &
 	Ref<InputEventScreenTouch> st;
 	st.instantiate();
 	st->set_device(get_device());
+	st->set_timestamp_usec(get_timestamp_usec());
 	st->set_window_id(get_window_id());
 	st->set_index(index);
 	st->set_position(p_xform.xform(pos + p_local_ofs));
@@ -1527,6 +1544,7 @@ RequiredResult<InputEvent> InputEventScreenDrag::xformed_by(const Transform2D &p
 	sd.instantiate();
 
 	sd->set_device(get_device());
+	sd->set_timestamp_usec(get_timestamp_usec());
 	sd->set_window_id(get_window_id());
 
 	sd->set_index(index);
@@ -1567,6 +1585,9 @@ bool InputEventScreenDrag::accumulate(const Ref<InputEvent> &p_event) {
 	set_screen_velocity(drag->get_screen_velocity());
 	relative += drag->get_relative();
 	screen_relative += drag->get_relative_screen_position();
+	if (drag->get_timestamp_usec() != 0) {
+		set_timestamp_usec(drag->get_timestamp_usec());
+	}
 
 	return true;
 }
@@ -1745,6 +1766,7 @@ RequiredResult<InputEvent> InputEventMagnifyGesture::xformed_by(const Transform2
 	ev.instantiate();
 
 	ev->set_device(get_device());
+	ev->set_timestamp_usec(get_timestamp_usec());
 	ev->set_window_id(get_window_id());
 
 	ev->set_modifiers_from_event(this);
@@ -1787,6 +1809,7 @@ RequiredResult<InputEvent> InputEventPanGesture::xformed_by(const Transform2D &p
 	ev.instantiate();
 
 	ev->set_device(get_device());
+	ev->set_timestamp_usec(get_timestamp_usec());
 	ev->set_window_id(get_window_id());
 
 	ev->set_modifiers_from_event(this);

@@ -287,7 +287,14 @@ void DisplayServerAppleEmbedded::_window_callback(const Callable &p_callable, co
 
 // MARK: Touches
 
-void DisplayServerAppleEmbedded::touch_press(int p_idx, int p_x, int p_y, bool p_pressed, bool p_double_click, bool p_long_press) {
+static uint64_t _apple_timestamp_to_ticks_usec(double p_timestamp_sec) {
+	if (p_timestamp_sec <= 0.0 || !Math::is_finite(p_timestamp_sec)) {
+		return 0;
+	}
+	return OS_AppleEmbedded::get_singleton()->monotonic_usec_to_ticks_usec((uint64_t)(p_timestamp_sec * 1000000.0));
+}
+
+void DisplayServerAppleEmbedded::touch_press(int p_idx, int p_x, int p_y, bool p_pressed, bool p_double_click, bool p_long_press, double p_timestamp_sec) {
 	Ref<InputEventScreenTouch> ev;
 	ev.instantiate();
 
@@ -296,10 +303,11 @@ void DisplayServerAppleEmbedded::touch_press(int p_idx, int p_x, int p_y, bool p
 	ev->set_position(Vector2(p_x, p_y));
 	ev->set_double_tap(p_double_click);
 	ev->set_long_press(p_long_press);
+	ev->set_timestamp_usec(_apple_timestamp_to_ticks_usec(p_timestamp_sec));
 	perform_event(ev);
 }
 
-void DisplayServerAppleEmbedded::touch_drag(int p_idx, int p_prev_x, int p_prev_y, int p_x, int p_y, float p_pressure, Vector2 p_tilt) {
+void DisplayServerAppleEmbedded::touch_drag(int p_idx, int p_prev_x, int p_prev_y, int p_x, int p_y, float p_pressure, Vector2 p_tilt, double p_timestamp_sec) {
 	Ref<InputEventScreenDrag> ev;
 	ev.instantiate();
 	ev->set_index(p_idx);
@@ -308,6 +316,7 @@ void DisplayServerAppleEmbedded::touch_drag(int p_idx, int p_prev_x, int p_prev_
 	ev->set_position(Vector2(p_x, p_y));
 	ev->set_relative(Vector2(p_x - p_prev_x, p_y - p_prev_y));
 	ev->set_relative_screen_position(ev->get_relative());
+	ev->set_timestamp_usec(_apple_timestamp_to_ticks_usec(p_timestamp_sec));
 	perform_event(ev);
 }
 
@@ -320,19 +329,20 @@ void DisplayServerAppleEmbedded::perform_event(const Ref<InputEvent> &p_event) {
 	input_singleton->parse_input_event(p_event);
 }
 
-void DisplayServerAppleEmbedded::touches_canceled(int p_idx) {
+void DisplayServerAppleEmbedded::touches_canceled(int p_idx, double p_timestamp_sec) {
 	Ref<InputEventScreenTouch> ev;
 	ev.instantiate();
 
 	ev->set_index(p_idx);
 	ev->set_canceled(true);
 	ev->set_position(Vector2(-1, -1));
+	ev->set_timestamp_usec(_apple_timestamp_to_ticks_usec(p_timestamp_sec));
 	perform_event(ev);
 }
 
 // MARK: Keyboard
 
-void DisplayServerAppleEmbedded::key(Key p_key, char32_t p_char, Key p_unshifted, Key p_physical, NSInteger p_modifier, bool p_pressed, KeyLocation p_location) {
+void DisplayServerAppleEmbedded::key(Key p_key, char32_t p_char, Key p_unshifted, Key p_physical, NSInteger p_modifier, bool p_pressed, KeyLocation p_location, double p_timestamp_sec) {
 	Ref<InputEventKey> ev;
 	ev.instantiate();
 	ev->set_echo(false);
@@ -356,6 +366,7 @@ void DisplayServerAppleEmbedded::key(Key p_key, char32_t p_char, Key p_unshifted
 	ev->set_physical_keycode(p_physical);
 	ev->set_unicode(fix_unicode(p_char));
 	ev->set_location(p_location);
+	ev->set_timestamp_usec(_apple_timestamp_to_ticks_usec(p_timestamp_sec));
 	perform_event(ev);
 }
 

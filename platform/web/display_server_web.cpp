@@ -176,6 +176,13 @@ void DisplayServerWeb::_request_quit_callback() {
 
 // Keys
 
+static uint64_t _dom_timestamp_to_ticks_usec(double p_timestamp_ms) {
+	if (p_timestamp_ms <= 0.0 || !Math::is_finite(p_timestamp_ms)) {
+		return 0;
+	}
+	return OS_Web::get_singleton()->monotonic_usec_to_ticks_usec((uint64_t)(p_timestamp_ms * 1000.0));
+}
+
 void DisplayServerWeb::dom2godot_mod(Ref<InputEventWithModifiers> ev, int p_mod, Key p_keycode) {
 	if (p_keycode != Key::SHIFT) {
 		ev->set_shift_pressed(p_mod & 1);
@@ -191,7 +198,7 @@ void DisplayServerWeb::dom2godot_mod(Ref<InputEventWithModifiers> ev, int p_mod,
 	}
 }
 
-void DisplayServerWeb::key_callback(int p_pressed, int p_repeat, int p_modifiers) {
+void DisplayServerWeb::key_callback(int p_pressed, int p_repeat, int p_modifiers, double p_timestamp_ms) {
 	DisplayServerWeb *ds = get_singleton();
 	JSKeyEvent &key_event = ds->key_event;
 
@@ -200,15 +207,15 @@ void DisplayServerWeb::key_callback(int p_pressed, int p_repeat, int p_modifiers
 
 #ifdef PROXY_TO_PTHREAD_ENABLED
 	if (!Thread::is_main_thread()) {
-		callable_mp_static(DisplayServerWeb::_key_callback).call_deferred(code, key, p_pressed, p_repeat, p_modifiers);
+		callable_mp_static(DisplayServerWeb::_key_callback).call_deferred(code, key, p_pressed, p_repeat, p_modifiers, p_timestamp_ms);
 		return;
 	}
 #endif
 
-	_key_callback(code, key, p_pressed, p_repeat, p_modifiers);
+	_key_callback(code, key, p_pressed, p_repeat, p_modifiers, p_timestamp_ms);
 }
 
-void DisplayServerWeb::_key_callback(const String &p_key_event_code, const String &p_key_event_key, int p_pressed, int p_repeat, int p_modifiers) {
+void DisplayServerWeb::_key_callback(const String &p_key_event_code, const String &p_key_event_key, int p_pressed, int p_repeat, int p_modifiers, double p_timestamp_ms) {
 	// Resume audio context after input in case autoplay was denied.
 	OS_Web::get_singleton()->resume_audio();
 
@@ -238,6 +245,7 @@ void DisplayServerWeb::_key_callback(const String &p_key_event_code, const Strin
 	ke.unicode = fix_unicode(c);
 	ke.location = location;
 	ke.mod = p_modifiers;
+	ke.timestamp_usec = _dom_timestamp_to_ticks_usec(p_timestamp_ms);
 
 	if (ds->key_event_pos >= ds->key_event_buffer.size()) {
 		ds->key_event_buffer.resize(1 + ds->key_event_pos);
@@ -250,23 +258,24 @@ void DisplayServerWeb::_key_callback(const String &p_key_event_code, const Strin
 
 // Mouse
 
-int DisplayServerWeb::mouse_button_callback(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers) {
+int DisplayServerWeb::mouse_button_callback(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers, double p_timestamp_ms) {
 #ifdef PROXY_TO_PTHREAD_ENABLED
 	if (!Thread::is_main_thread()) {
-		callable_mp_static(DisplayServerWeb::_mouse_button_callback).call_deferred(p_pressed, p_button, p_x, p_y, p_modifiers);
+		callable_mp_static(DisplayServerWeb::_mouse_button_callback).call_deferred(p_pressed, p_button, p_x, p_y, p_modifiers, p_timestamp_ms);
 		return true;
 	}
 #endif
 
-	return _mouse_button_callback(p_pressed, p_button, p_x, p_y, p_modifiers);
+	return _mouse_button_callback(p_pressed, p_button, p_x, p_y, p_modifiers, p_timestamp_ms);
 }
 
-int DisplayServerWeb::_mouse_button_callback(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers) {
+int DisplayServerWeb::_mouse_button_callback(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers, double p_timestamp_ms) {
 	DisplayServerWeb *ds = get_singleton();
 
 	Point2 pos(p_x, p_y);
 	Ref<InputEventMouseButton> ev;
 	ev.instantiate();
+	ev->set_timestamp_usec(_dom_timestamp_to_ticks_usec(p_timestamp_ms));
 	ev->set_position(pos);
 	ev->set_global_position(pos);
 	ev->set_pressed(p_pressed);
@@ -337,18 +346,18 @@ int DisplayServerWeb::_mouse_button_callback(int p_pressed, int p_button, double
 	return true;
 }
 
-void DisplayServerWeb::mouse_move_callback(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure) {
+void DisplayServerWeb::mouse_move_callback(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure, double p_timestamp_ms) {
 #ifdef PROXY_TO_PTHREAD_ENABLED
 	if (!Thread::is_main_thread()) {
-		callable_mp_static(DisplayServerWeb::_mouse_move_callback).call_deferred(p_x, p_y, p_rel_x, p_rel_y, p_modifiers, p_pressure);
+		callable_mp_static(DisplayServerWeb::_mouse_move_callback).call_deferred(p_x, p_y, p_rel_x, p_rel_y, p_modifiers, p_pressure, p_timestamp_ms);
 		return;
 	}
 #endif
 
-	_mouse_move_callback(p_x, p_y, p_rel_x, p_rel_y, p_modifiers, p_pressure);
+	_mouse_move_callback(p_x, p_y, p_rel_x, p_rel_y, p_modifiers, p_pressure, p_timestamp_ms);
 }
 
-void DisplayServerWeb::_mouse_move_callback(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure) {
+void DisplayServerWeb::_mouse_move_callback(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure, double p_timestamp_ms) {
 	BitField<MouseButtonMask> input_mask = Input::get_singleton()->get_mouse_button_mask();
 	// For motion outside the canvas, only read mouse movement if dragging
 	// started inside the canvas; imitating desktop app behavior.
@@ -359,6 +368,7 @@ void DisplayServerWeb::_mouse_move_callback(double p_x, double p_y, double p_rel
 	Point2 pos(p_x, p_y);
 	Ref<InputEventMouseMotion> ev;
 	ev.instantiate();
+	ev->set_timestamp_usec(_dom_timestamp_to_ticks_usec(p_timestamp_ms));
 	dom2godot_mod(ev, p_modifiers, Key::NONE);
 	ev->set_button_mask(input_mask);
 
@@ -666,18 +676,18 @@ Point2i DisplayServerWeb::mouse_get_position() const {
 }
 
 // Wheel
-int DisplayServerWeb::mouse_wheel_callback(int p_delta_mode, double p_delta_x, double p_delta_y) {
+int DisplayServerWeb::mouse_wheel_callback(int p_delta_mode, double p_delta_x, double p_delta_y, double p_timestamp_ms) {
 #ifdef PROXY_TO_PTHREAD_ENABLED
 	if (!Thread::is_main_thread()) {
-		callable_mp_static(DisplayServerWeb::_mouse_wheel_callback).call_deferred(p_delta_mode, p_delta_x, p_delta_y);
+		callable_mp_static(DisplayServerWeb::_mouse_wheel_callback).call_deferred(p_delta_mode, p_delta_x, p_delta_y, p_timestamp_ms);
 		return true;
 	}
 #endif
 
-	return _mouse_wheel_callback(p_delta_mode, p_delta_x, p_delta_y);
+	return _mouse_wheel_callback(p_delta_mode, p_delta_x, p_delta_y, p_timestamp_ms);
 }
 
-int DisplayServerWeb::_mouse_wheel_callback(int p_delta_mode, double p_delta_x, double p_delta_y) {
+int DisplayServerWeb::_mouse_wheel_callback(int p_delta_mode, double p_delta_x, double p_delta_y, double p_timestamp_ms) {
 	if (!godot_js_display_canvas_is_focused() && !godot_js_is_ime_focused()) {
 		if (get_singleton()->cursor_inside_canvas) {
 			godot_js_display_canvas_focus();
@@ -689,6 +699,7 @@ int DisplayServerWeb::_mouse_wheel_callback(int p_delta_mode, double p_delta_x, 
 	Input *input = Input::get_singleton();
 	Ref<InputEventMouseButton> ev;
 	ev.instantiate();
+	ev->set_timestamp_usec(_dom_timestamp_to_ticks_usec(p_timestamp_ms));
 	ev->set_position(input->get_mouse_position());
 	ev->set_global_position(ev->get_position());
 
@@ -744,6 +755,7 @@ int DisplayServerWeb::_mouse_wheel_callback(int p_delta_mode, double p_delta_x, 
 	input->parse_input_event(ev);
 
 	Ref<InputEventMouseButton> release = ev->duplicate();
+	release->set_timestamp_usec(ev->get_timestamp_usec());
 	release->set_pressed(false);
 	release->set_button_mask(input->get_mouse_button_mask());
 	input->parse_input_event(release);
@@ -752,19 +764,20 @@ int DisplayServerWeb::_mouse_wheel_callback(int p_delta_mode, double p_delta_x, 
 }
 
 // Touch
-void DisplayServerWeb::touch_callback(int p_type, int p_count) {
+void DisplayServerWeb::touch_callback(int p_type, int p_count, double p_timestamp_ms) {
 #ifdef PROXY_TO_PTHREAD_ENABLED
 	if (!Thread::is_main_thread()) {
-		callable_mp_static(DisplayServerWeb::_touch_callback).call_deferred(p_type, p_count);
+		callable_mp_static(DisplayServerWeb::_touch_callback).call_deferred(p_type, p_count, p_timestamp_ms);
 		return;
 	}
 #endif
 
-	_touch_callback(p_type, p_count);
+	_touch_callback(p_type, p_count, p_timestamp_ms);
 }
 
-void DisplayServerWeb::_touch_callback(int p_type, int p_count) {
+void DisplayServerWeb::_touch_callback(int p_type, int p_count, double p_timestamp_ms) {
 	DisplayServerWeb *ds = get_singleton();
+	const uint64_t timestamp_usec = _dom_timestamp_to_ticks_usec(p_timestamp_ms);
 
 	const JSTouchEvent &touch_event = ds->touch_event;
 	for (int i = 0; i < p_count; i++) {
@@ -773,6 +786,7 @@ void DisplayServerWeb::_touch_callback(int p_type, int p_count) {
 			// touchmove
 			Ref<InputEventScreenDrag> ev;
 			ev.instantiate();
+			ev->set_timestamp_usec(timestamp_usec);
 			ev->set_index(touch_event.identifier[i]);
 			ev->set_position(point);
 
@@ -790,6 +804,7 @@ void DisplayServerWeb::_touch_callback(int p_type, int p_count) {
 			OS_Web::get_singleton()->resume_audio();
 
 			ev.instantiate();
+			ev->set_timestamp_usec(timestamp_usec);
 			ev->set_index(touch_event.identifier[i]);
 			ev->set_position(point);
 			ev->set_pressed(p_type == 0);
@@ -1573,6 +1588,7 @@ void DisplayServerWeb::process_keys() {
 		ev->set_key_label(ke.key_label);
 		ev->set_unicode(ke.unicode);
 		ev->set_location(ke.location);
+		ev->set_timestamp_usec(ke.timestamp_usec);
 		if (ke.raw) {
 			dom2godot_mod(ev, ke.mod, ke.keycode);
 		}

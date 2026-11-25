@@ -479,12 +479,12 @@ const GodotInput = {
 					if (!pEvent.shiftKey && held.delete(other)) {
 						// Some browsers report only the last release. Both sides are now up.
 						GodotInput.setInputKeyData(other, pEvent.key);
-						GodotInput.inputKeyCallback(0, false, modifiers);
+						GodotInput.inputKeyCallback(0, false, modifiers, pEvent.timeStamp);
 					}
 				}
 			}
 			GodotInput.setInputKeyData(pEvent.code, pEvent.key);
-			GodotInput.inputKeyCallback(pIsPressed ? 1 : 0, repeat, modifiers);
+			GodotInput.inputKeyCallback(pIsPressed ? 1 : 0, repeat, modifiers, pEvent.timeStamp);
 			pEvent.preventDefault();
 		},
 	},
@@ -507,7 +507,7 @@ const GodotInput = {
 			const rel_pos_x = evt.movementX * rw;
 			const rel_pos_y = evt.movementY * rh;
 			const modifiers = GodotInput.getModifiers(evt);
-			func(pos[0], pos[1], rel_pos_x, rel_pos_y, modifiers, evt.pressure);
+			func(pos[0], pos[1], rel_pos_x, rel_pos_y, modifiers, evt.pressure, evt.timeStamp);
 		}
 		GodotEventListeners.add(window, 'pointermove', move_cb, false);
 	},
@@ -517,7 +517,7 @@ const GodotInput = {
 	godot_js_input_mouse_wheel_cb: function (callback) {
 		const func = GodotRuntime.get_func(callback);
 		function wheel_cb(evt) {
-			if (func(evt.deltaMode, evt.deltaX ?? 0, evt.deltaY ?? 0)) {
+			if (func(evt.deltaMode, evt.deltaX ?? 0, evt.deltaY ?? 0, evt.timeStamp)) {
 				evt.preventDefault();
 			}
 		}
@@ -538,7 +538,7 @@ const GodotInput = {
 			if (p_pressed) {
 				GodotConfig.canvas.focus();
 			}
-			if (func(p_pressed, evt.button, pos[0], pos[1], modifiers)) {
+			if (func(p_pressed, evt.button, pos[0], pos[1], modifiers, evt.timeStamp)) {
 				evt.preventDefault();
 			}
 		}
@@ -569,7 +569,7 @@ const GodotInput = {
 				GodotRuntime.setHeapValue(coords + (i * 2 + 1) * 8, pos[1], 'double');
 				GodotRuntime.setHeapValue(ids + i * 4, touch.identifier, 'i32');
 			}
-			func(type, touches.length);
+			func(type, touches.length, evt.timeStamp);
 			if (evt.cancelable) {
 				evt.preventDefault();
 			}

@@ -110,6 +110,7 @@ private:
 		uint32_t unicode = 0;
 		KeyLocation location = KeyLocation::UNSPECIFIED;
 		int mod = 0;
+		uint64_t timestamp_usec = 0;
 	};
 
 	Vector<KeyEvent> key_event_buffer;
@@ -133,16 +134,16 @@ private:
 	// events
 	WASM_EXPORT static void fullscreen_change_callback(int p_fullscreen);
 	static void _fullscreen_change_callback(int p_fullscreen);
-	WASM_EXPORT static int mouse_button_callback(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers);
-	static int _mouse_button_callback(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers);
-	WASM_EXPORT static void mouse_move_callback(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure);
-	static void _mouse_move_callback(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure);
-	WASM_EXPORT static int mouse_wheel_callback(int p_delta_mode, double p_delta_x, double p_delta_y);
-	static int _mouse_wheel_callback(int p_delta_mode, double p_delta_x, double p_delta_y);
-	WASM_EXPORT static void touch_callback(int p_type, int p_count);
-	static void _touch_callback(int p_type, int p_count);
-	WASM_EXPORT static void key_callback(int p_pressed, int p_repeat, int p_modifiers);
-	static void _key_callback(const String &p_key_event_code, const String &p_key_event_key, int p_pressed, int p_repeat, int p_modifiers);
+	WASM_EXPORT static int mouse_button_callback(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers, double p_timestamp_ms);
+	static int _mouse_button_callback(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers, double p_timestamp_ms);
+	WASM_EXPORT static void mouse_move_callback(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure, double p_timestamp_ms);
+	static void _mouse_move_callback(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure, double p_timestamp_ms);
+	WASM_EXPORT static int mouse_wheel_callback(int p_delta_mode, double p_delta_x, double p_delta_y, double p_timestamp_ms);
+	static int _mouse_wheel_callback(int p_delta_mode, double p_delta_x, double p_delta_y, double p_timestamp_ms);
+	WASM_EXPORT static void touch_callback(int p_type, int p_count, double p_timestamp_ms);
+	static void _touch_callback(int p_type, int p_count, double p_timestamp_ms);
+	WASM_EXPORT static void key_callback(int p_pressed, int p_repeat, int p_modifiers, double p_timestamp_ms);
+	static void _key_callback(const String &p_key_event_code, const String &p_key_event_key, int p_pressed, int p_repeat, int p_modifiers, double p_timestamp_ms);
 	WASM_EXPORT static void vk_input_text_callback(const char *p_text, int p_cursor);
 	static void _vk_input_text_callback(const String &p_text, int p_cursor);
 	WASM_EXPORT static void gamepad_callback(int p_index, int p_connected, const char *p_id, const char *p_guid);
