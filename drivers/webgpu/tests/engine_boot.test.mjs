@@ -11,11 +11,12 @@ function harness(gpu, unavailableReason = '', { webgl = true, defaultDriver = ''
     const modules = [];
     const calls = [];
     const warnings = [];
+    const infos = [];
     const contexts = [];
     class HTMLCanvasElement {}
     const canvas = new HTMLCanvasElement();
     const context = vm.createContext({
-        Response, console: { ...console, warn: (...args) => warnings.push(args) },
+        Response, console: { ...console, warn: (...args) => warnings.push(args), info: (...args) => infos.push(args) },
         window: { fetch() {}, Response, isSecureContext: true, crossOriginIsolated: true, SharedArrayBuffer },
         navigator: { gpu, language: 'en-US' },
         HTMLCanvasElement, document: {
@@ -40,7 +41,7 @@ function harness(gpu, unavailableReason = '', { webgl = true, defaultDriver = ''
     });
     vm.runInContext(configSource.replace("renderingDriver: '',", `renderingDriver: '${defaultDriver}',`)
         + '\n' + featuresSource + '\n' + engineSource.replace('___GODOT_WEBGPU_UNAVAILABLE_REASON___', JSON.stringify(unavailableReason)), context);
-    return { Engine: context.window.Engine, modules, calls, warnings, contexts, window: context.window };
+    return { Engine: context.window.Engine, modules, calls, warnings, infos, contexts, window: context.window };
 }
 
 test('WebGPU preflight does not create or require a WebGL context', () => {
@@ -184,11 +185,11 @@ test('native startup errors remain visible instead of triggering device fallback
 test('the browser requests the same optional features and all limits as the native backend', async () => {
     let descriptor = null;
     const device = { lost: new Promise(() => {}), addEventListener() {} };
-    const { Engine } = harness({
+    const { Engine, infos } = harness({
         async requestAdapter() {
             return {
                 features: new Set(['indirect-first-instance', 'timestamp-query', 'depth32float-stencil8']),
-                info: { vendor: 'intel', device: 'GPU test adapter' },
+                info: { vendor: 'intel', architecture: 'xe', device: 'GPU test adapter' },
                 limits: { maxComputeWorkgroupSizeX: 256 },
                 async requestDevice(value) {
                     descriptor = value;
@@ -201,6 +202,7 @@ test('the browser requests the same optional features and all limits as the nati
     assert.deepEqual([...descriptor.requiredFeatures].sort(), ['depth32float-stencil8', 'indirect-first-instance']);
     assert.equal(descriptor.requiredLimits.maxComputeWorkgroupSizeX, 256);
     assert.equal(device.godotAdapterInfo.device, 'GPU test adapter');
+    assert.equal(infos[0][0], '[Godot] WebGPU adapter: intel / xe / GPU test adapter');
 });
 
 for (const reason of [

@@ -104,8 +104,13 @@ Error RenderingContextDriverWebGPU::initialize() {
 
 	// Populate device info.
 	char *adapter_name = (char *)EM_ASM_PTR({
-		var info = Module['preinitializedWebGPUDevice']['godotAdapterInfo'] || {};
-		return stringToNewUTF8([info.vendor, info.description || info.architecture || info.device].filter(Boolean).join(' ') || 'WebGPU Device');
+		var info = Module["preinitializedWebGPUDevice"]["godotAdapterInfo"] || {};
+		var parts = [];
+		for (var v of [info.vendor, info.description, info.architecture, info.device]) {
+			if (v && parts.indexOf(v) === -1) parts.push(v);
+		}
+		if (info.isFallbackAdapter) parts.push("fallback");
+		return stringToNewUTF8(parts.join(" ") || "WebGPU Device");
 	});
 	device_info.name = String::utf8(adapter_name);
 	free(adapter_name);
