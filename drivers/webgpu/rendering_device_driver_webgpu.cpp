@@ -57,7 +57,9 @@ static constexpr uint32_t MAX_INFLIGHT_PREWARMS = 16;
 static constexpr uint32_t MAX_INFLIGHT_PREWARMS_FIREFOX = 4;
 static uint32_t max_inflight_prewarms = MAX_INFLIGHT_PREWARMS;
 // Cap presented frames queued ahead of the GPU so input cannot drift behind rendered frames.
+// Firefox polls queue.onSubmittedWorkDone() on a 100 ms timer when submissions pause, trapping a cap in 100 ms stalls.
 static constexpr uint32_t MAX_INFLIGHT_GPU_FRAMES = 2;
+static uint32_t max_inflight_gpu_frames = MAX_INFLIGHT_GPU_FRAMES;
 #endif
 #include <cstdio>
 #include <cstdlib>
@@ -224,8 +226,9 @@ RenderingDeviceDriverWebGPU::RenderingDeviceDriverWebGPU(RenderingContextDriverW
 		in_flight_gpu_frames = 0;
 		const bool is_firefox = EM_ASM_INT({ return typeof navigator !== "undefined" && /firefox/i.test(navigator.userAgent || "") ? 1 : 0; }) != 0;
 		max_inflight_prewarms = is_firefox ? MAX_INFLIGHT_PREWARMS_FIREFOX : MAX_INFLIGHT_PREWARMS;
+		max_inflight_gpu_frames = is_firefox ? 0 : MAX_INFLIGHT_GPU_FRAMES;
 	}
-	print_verbose(vformat("WebGPU: max_inflight_prewarms=%d", (int)max_inflight_prewarms));
+	print_verbose(vformat("WebGPU: max_inflight_prewarms=%d max_inflight_gpu_frames=%d", (int)max_inflight_prewarms, (int)max_inflight_gpu_frames));
 #endif
 }
 
@@ -2693,7 +2696,7 @@ Error RenderingDeviceDriverWebGPU::command_queue_execute_and_present(CommandQueu
 			cb.callback = _fence_work_done_callback;
 			cb.userdata1 = fence;
 #ifdef WEB_ENABLED
-			const bool track_frame = p_swap_chains.size() > 0;
+			const bool track_frame = p_swap_chains.size() > 0 && max_inflight_gpu_frames > 0;
 			if (track_frame) {
 				MutexLock lock(prewarm_mutex);
 				in_flight_gpu_frames++;
@@ -5790,12 +5793,15 @@ bool RenderingDeviceDriverWebGPU::has_pending_pipelines() {
 
 bool RenderingDeviceDriverWebGPU::is_gpu_queue_full() {
 #ifdef WEB_ENABLED
+	if (max_inflight_gpu_frames == 0) {
+		return false;
+	}
 	WGPUInstance inst = context_driver ? context_driver->get_instance() : nullptr;
 	if (inst) {
 		wgpuInstanceProcessEvents(inst);
 	}
 	MutexLock lock(prewarm_mutex);
-	return in_flight_gpu_frames >= MAX_INFLIGHT_GPU_FRAMES;
+	return in_flight_gpu_frames >= max_inflight_gpu_frames;
 #else
 	return false;
 #endif
