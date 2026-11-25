@@ -48,6 +48,7 @@
 #include "core/input/input_event.h"
 #include "core/os/main_loop.h"
 #include "core/os/os.h"
+#include "main/main.h"
 #include "servers/display/accessibility_server.h"
 #include "servers/display/native_menu.h"
 #include "servers/rendering/dummy/rasterizer_dummy.h"
@@ -1971,7 +1972,10 @@ void DisplayServerWayland::process_events() {
 	wayland_thread.mutex.lock();
 
 	// Some behavior depends on the progress of the main thread.
-	wayland_thread.main_loop_callback();
+	// 2dog: once per frame only; agile input flushing also pumps between physics steps, before any commit.
+	if (!Main::is_iterating()) {
+		wayland_thread.main_loop_callback();
+	}
 
 	while (wayland_thread.has_message()) {
 		Ref<WaylandThread::Message> msg = wayland_thread.pop_message();

@@ -5172,6 +5172,16 @@ static uint64_t physics_process_max = 0;
 static uint64_t process_max = 0;
 static uint64_t navigation_process_max = 0;
 
+// 2dog: agile flushing pumps platform input mid-frame, so events that arrive between physics steps reach the next
+// step on every platform, not only where input lands on its own thread (Android).
+static void _flush_agile_input(bool p_poll) {
+	if (p_poll) {
+		DisplayServer::get_singleton()->process_events();
+		OS::get_singleton()->process_joypads();
+	}
+	Input::get_singleton()->flush_buffered_events();
+}
+
 // Return false means iterating further, returning true means `OS::run`
 // will terminate the program. In case of failure, the OS exit code needs
 // to be set explicitly here (defaults to EXIT_SUCCESS).
@@ -5230,7 +5240,7 @@ bool Main::iteration() {
 		GodotProfileZone("Physics Step");
 		GodotProfileZoneGroupedFirst(_physics_zone, "setup");
 		if (Input::get_singleton()->is_agile_input_event_flushing()) {
-			Input::get_singleton()->flush_buffered_events();
+			_flush_agile_input(iters > 0); // The OS run loop just pumped before the first step.
 		}
 
 		Engine::get_singleton()->_in_physics = true;
@@ -5325,7 +5335,7 @@ bool Main::iteration() {
 	}
 
 	if (Input::get_singleton()->is_agile_input_event_flushing()) {
-		Input::get_singleton()->flush_buffered_events();
+		_flush_agile_input(advance.physics_steps > 0);
 	}
 
 	uint64_t process_begin = OS::get_singleton()->get_ticks_usec();

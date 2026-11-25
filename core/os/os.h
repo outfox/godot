@@ -284,6 +284,8 @@ public:
 
 	virtual void delay_usec(uint32_t p_usec) const = 0;
 	virtual void add_frame_delay(bool p_can_draw, bool p_wake_for_events);
+	// 2dog: polls OS-owned joypads between physics steps when agile event flushing is enabled.
+	virtual void process_joypads() {}
 	virtual uint64_t get_frame_delay(bool p_can_draw) const;
 
 	virtual uint64_t get_ticks_usec() const = 0;

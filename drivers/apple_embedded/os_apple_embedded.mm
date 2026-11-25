@@ -191,6 +191,14 @@ void OS_AppleEmbedded::initialize_joypads() {
 #endif
 }
 
+void OS_AppleEmbedded::process_joypads() {
+#ifdef SDL_ENABLED
+	if (joypad_sdl) {
+		joypad_sdl->process_events();
+	}
+#endif
+}
+
 void OS_AppleEmbedded::initialize_modules() {
 	apple_embedded = memnew(AppleEmbedded);
 	Engine::get_singleton()->add_singleton(Engine::Singleton("AppleEmbedded", apple_embedded));

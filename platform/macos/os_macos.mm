@@ -255,6 +255,14 @@ void OS_MacOS::initialize_joypads() {
 #endif
 }
 
+void OS_MacOS::process_joypads() {
+#ifdef SDL_ENABLED
+	if (joypad_sdl) {
+		joypad_sdl->process_events();
+	}
+#endif
+}
+
 void OS_MacOS::set_main_loop(MainLoop *p_main_loop) {
 	main_loop = p_main_loop;
 }

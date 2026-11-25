@@ -67,6 +67,7 @@ private:
 	virtual void initialize() override;
 
 	virtual void initialize_joypads() override;
+	virtual void process_joypads() override;
 
 	virtual void set_main_loop(MainLoop *p_main_loop) override;
 	virtual MainLoop *get_main_loop() const override;

@@ -198,6 +198,14 @@ void OS_LinuxBSD::initialize_joypads() {
 #endif
 }
 
+void OS_LinuxBSD::process_joypads() {
+#ifdef SDL_ENABLED
+	if (joypad_sdl) {
+		joypad_sdl->process_events();
+	}
+#endif
+}
+
 String OS_LinuxBSD::get_unique_id() const {
 	static String machine_id;
 	if (machine_id.is_empty()) {
