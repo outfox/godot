@@ -21,6 +21,8 @@ const Preloader = /** @constructor */ function () { // eslint-disable-line no-un
 			start: function (controller) {
 				onloadprogress(reader, controller).then(function () {
 					controller.close();
+				}, function (err) {
+					controller.error(err);
 				});
 			},
 		}), { headers: response.headers });
@@ -32,9 +34,9 @@ const Preloader = /** @constructor */ function () { // eslint-disable-line no-un
 			loaded: 0,
 			done: false,
 		};
-		function consume(response) {
+		function consume(response, buffered) {
 			const tr = getTrackedResponse(response, tracker[file]);
-			if (raw) {
+			if (raw && !buffered) {
 				return Promise.resolve(tr);
 			}
 			return tr.arrayBuffer();
@@ -54,7 +56,13 @@ const Preloader = /** @constructor */ function () { // eslint-disable-line no-un
 				if (!response.ok || !response.body) {
 					return plain();
 				}
-				return consume(new Response(response.body.pipeThrough(new DecompressionStream('gzip'))));
+				// Hosts may already decode the response; inflating it again fails, so use the plain file then.
+				return consume(new Response(response.body.pipeThrough(new DecompressionStream('gzip'))), true).then(function (buffer) {
+					return raw ? new Response(buffer) : buffer;
+				}, function () {
+					tracker[file].loaded = 0;
+					return plain();
+				});
 			}, plain);
 		}
 		return plain();
