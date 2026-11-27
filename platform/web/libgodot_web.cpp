@@ -144,6 +144,7 @@ extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
 	}
 #endif
 
+#ifdef RD_ENABLED // 2dog: builds without WebGPU (double precision) have no RenderingDevice to link against.
 	// 2dog: avoid re-rendering and flooding the GPU queue while async pipelines finish compiling.
 	if (waiting_for_pipelines) {
 		RenderingDevice *rd = RenderingDevice::get_singleton();
@@ -158,6 +159,7 @@ extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
 		gpu_queue_skips++;
 		return false;
 	}
+#endif
 
 	const uint64_t iter_start = is_print_verbose_enabled() ? os->get_ticks_usec() : 0;
 	const uint64_t phys_before = is_print_verbose_enabled() ? Engine::get_singleton()->get_physics_frames() : 0;
@@ -184,11 +186,13 @@ extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
 		gpu_queue_skips = 0;
 	}
 
+#ifdef RD_ENABLED
 	// Only pause the loop during boot under the splash screen; mid-game async compiles run in the background.
 	if (reported_frames < 8 && skipped_draws != RSG::pipeline_skipped_draws) {
 		RenderingDevice *rd = RenderingDevice::get_singleton();
 		waiting_for_pipelines = rd && rd->has_pending_pipelines();
 	}
+#endif
 
 	// 2dog: the page's loading screen stays over the first complete frames, which still stall on shader compilation.
 	if (reported_frames < 8 && skipped_draws == RSG::pipeline_skipped_draws) {
