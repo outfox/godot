@@ -353,6 +353,12 @@ def configure(env: "SConsEnvironment"):
     env.Append(CCFLAGS=["-sSUPPORT_LONGJMP='wasm'"])
     env.Append(LINKFLAGS=["-sSUPPORT_LONGJMP='wasm'"])
 
+    # 2dog: the .NET 11 runtime (Emscripten 6) uses the standardized exception encoding, and browsers reject a
+    # module that mixes it with the legacy one. Emscripten 3 (.NET 10) only has the legacy encoding.
+    if env["module_mono_enabled"] and cc_semver >= (6, 0, 0):
+        env.Append(CCFLAGS=["-sWASM_LEGACY_EXCEPTIONS=0"])
+        env.Append(LINKFLAGS=["-sWASM_LEGACY_EXCEPTIONS=0"])
+
     # Allow increasing memory buffer size during runtime. This is efficient
     # when using WebAssembly (in comparison to asm.js) and works well for
     # us since we don't know requirements at compile-time.

@@ -189,7 +189,8 @@ const GodotDylink = {
 				if (!raw) {
 					throw new Error('out of memory allocating the side module data');
 				}
-				memoryBase = alignMemory(zeroMemory(raw, meta.memorySize + memAlign), memAlign);
+				zeroMemory(raw, meta.memorySize + memAlign);
+				memoryBase = alignMemory(raw, memAlign);
 			}
 			let tableBase = 0;
 			let tableSize = meta.tableSize;

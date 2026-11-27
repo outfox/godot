@@ -105,28 +105,46 @@ namespace Godot
         }
 #pragma warning restore IDE1006
 
-        internal static unsafe StackFrame? GetCurrentStackFrame(int skipFrames = 0)
+        // StackTrace.GetFrames() doesn't filter out hidden frames, only ToString() does.
+        private static bool IsHiddenFromStackTrace(MethodBase method)
         {
-            // We skip 2 frames:
-            // The first skipped frame is the current method.
-            // The second skipped frame is a method in NativeInterop.NativeFuncs.
-            var stackTrace = new StackTrace(skipFrames: 2 + skipFrames, fNeedFileInfo: true);
-            return stackTrace.GetFrame(0);
+            if (method.IsDefined(typeof(StackTraceHiddenAttribute), inherit: false))
+                return true;
+
+            Type? declaringType = method.DeclaringType;
+            return declaringType is not null && declaringType.IsDefined(typeof(StackTraceHiddenAttribute), inherit: false);
+        }
+
+        [StackTraceHidden]
+        [UnconditionalSuppressMessage("Trimming", "IL2026",
+            Justification = "Diagnostics only: a frame whose method metadata was trimmed is skipped, nothing functional depends on it.")]
+        internal static StackFrame? GetCurrentStackFrame()
+        {
+            var stackTrace = new StackTrace(fNeedFileInfo: true);
+
+            foreach (StackFrame frame in stackTrace.GetFrames())
+            {
+                MethodBase? method = frame.GetMethod();
+                if (method is null || IsHiddenFromStackTrace(method))
+                    continue;
+
+                return frame;
+            }
+
+            return null;
         }
 
         [UnmanagedCallersOnly]
         [UnconditionalSuppressMessage("Trimming", "IL2026",
             Justification = "Diagnostics only: a frame whose method metadata was trimmed degrades to an incomplete stack trace entry, nothing functional depends on it.")]
+        [StackTraceHidden]
         internal static unsafe void GetCurrentStackInfo(void* destVector)
         {
             try
             {
                 var vector = (godot_stack_info_vector*)destVector;
 
-                // We skip 2 frames:
-                // The first skipped frame is the current method.
-                // The second skipped frame is a method in NativeInterop.NativeFuncs.
-                var stackTrace = new StackTrace(skipFrames: 2, fNeedFileInfo: true);
+                var stackTrace = new StackTrace(fNeedFileInfo: true);
                 int frameCount = stackTrace.FrameCount;
 
                 if (frameCount == 0)
@@ -139,7 +157,7 @@ namespace Godot
                 {
                     var method = frame.GetMethod();
 
-                    if (method is MethodInfo methodInfo && methodInfo.IsDefined(typeof(StackTraceHiddenAttribute)))
+                    if (method is not null && IsHiddenFromStackTrace(method))
                     {
                         // Skip methods marked hidden from the stack trace.
                         continue;

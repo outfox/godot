@@ -298,6 +298,8 @@ bool EditorExportPlatformPC::_copy_debugsymbols(Ref<DirAccess> &p_da, const Stri
 	const String destination = p_path + ".debugsymbols";
 	Vector<String> exec_debug_ids = OS::get_singleton()->get_debug_build_id(p_path);
 	Vector<String> symb_debug_ids = OS::get_singleton()->get_debug_build_id(sym_path);
+	print_verbose(vformat("Executable debug IDs: %s", exec_debug_ids));
+	print_verbose(vformat("Symbols debug IDs: %s", symb_debug_ids));
 	if (exec_debug_ids != symb_debug_ids) {
 		add_message(EXPORT_MESSAGE_WARNING, TTR("Prepare Templates"), vformat(TTR("Executable and symbols debug ID mismatch: %s != %s."), exec_debug_ids, symb_debug_ids));
 		if (!FileAccess::exists(destination)) {
