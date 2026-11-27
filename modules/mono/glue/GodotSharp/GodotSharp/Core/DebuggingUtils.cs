@@ -116,6 +116,8 @@ namespace Godot
         }
 
         [StackTraceHidden]
+        [UnconditionalSuppressMessage("Trimming", "IL2026",
+            Justification = "Diagnostics only: a frame whose method metadata was trimmed is skipped, nothing functional depends on it.")]
         internal static StackFrame? GetCurrentStackFrame()
         {
             var stackTrace = new StackTrace(fNeedFileInfo: true);
