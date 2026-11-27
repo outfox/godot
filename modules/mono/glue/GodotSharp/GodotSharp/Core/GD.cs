@@ -338,15 +338,16 @@ namespace Godot
         [StackTraceHidden]
         private static void ErrPrintError(string message, godot_error_handler_type type = godot_error_handler_type.ERR_HANDLER_ERROR)
         {
-            // Skip 1 frame to avoid current method.
-            var stackFrame = DebuggingUtils.GetCurrentStackFrame(skipFrames: 1);
-            // 2dog: diagnostics must work without caller metadata in AOT or trimmed builds.
-            string callerFilePath = string.Empty;
-            string callerName = string.Empty;
+            // Find the first frame that is not hidden from stack traces
+            var stackFrame = DebuggingUtils.GetCurrentStackFrame();
+
+            string callerName = "<unknown>";
+            string callerFilePath = "<unknown>";
             int callerLineNumber = 0;
-            if (stackFrame is not null)
+            if (stackFrame != null)
             {
                 string fileName = stackFrame.GetFileName();
+                // 2dog: AOT or trimmed builds report an empty file name.
                 if (!string.IsNullOrEmpty(fileName))
                     callerFilePath = ProjectSettings.LocalizePath(fileName);
                 DebuggingUtils.GetStackFrameMethodDecl(stackFrame, out callerName);
@@ -370,6 +371,7 @@ namespace Godot
         /// </code>
         /// </example>
         /// <param name="message">Error message.</param>
+        [StackTraceHidden]
         public static void PushError(string message)
         {
             ErrPrintError(message);
@@ -386,6 +388,7 @@ namespace Godot
         /// </code>
         /// </example>
         /// <param name="what">Arguments that form the error message.</param>
+        [StackTraceHidden]
         public static void PushError(params object[] what)
         {
             ErrPrintError(AppendPrintParams(what));
@@ -400,6 +403,7 @@ namespace Godot
         /// </code>
         /// </example>
         /// <param name="message">Warning message.</param>
+        [StackTraceHidden]
         public static void PushWarning(string message)
         {
             ErrPrintError(message, type: godot_error_handler_type.ERR_HANDLER_WARNING);
@@ -414,6 +418,7 @@ namespace Godot
         /// </code>
         /// </example>
         /// <param name="what">Arguments that form the warning message.</param>
+        [StackTraceHidden]
         public static void PushWarning(params object[] what)
         {
             ErrPrintError(AppendPrintParams(what), type: godot_error_handler_type.ERR_HANDLER_WARNING);
