@@ -68,8 +68,8 @@ const Godot = async (moduleConfig) => { // eslint-disable-line no-unused-vars
 		// Pass emscripten config.
 		.withModuleConfig(moduleConfig)
 		.withConfig({
-			// 2dog: let .NET configure the initial thread-pool size.
-			pthreadPoolInitialSize: moduleConfig['emscriptenPoolSize'] || 8,
+			// 2dog: at least 8 workers, whatever the host asks for: fewer can hang startup on the engine's own threads.
+			pthreadPoolInitialSize: Math.max(moduleConfig['emscriptenPoolSize'] || 0, 8),
 			// 2dog: enable synchronous JS import and export calls with threads.
 			jsThreadBlockingMode: 'ThrowWhenBlockingWait',
 		})
@@ -96,6 +96,19 @@ const Godot = async (moduleConfig) => { // eslint-disable-line no-unused-vars
 	perfMark('2dog:dotnet-downloaded');
 	const { setModuleImports, getAssemblyExports, getConfig, runMain, Module } = await dotnet.create();
 	perfMark('2dog:dotnet-created');
+
+	// 2dog: .NET 11 posts `run` to a worker created after startup before it listens, so the thread never starts
+	// (dotnet/runtime#136492). Hold a new worker's messages until it has loaded.
+	const pthreads = Module['PThread'];
+	if (pthreads) {
+		const loadWorker = pthreads['loadWasmModuleToWorker'];
+		pthreads['loadWasmModuleToWorker'] = (worker) => {
+			const loaded = loadWorker(worker);
+			const post = worker.postMessage.bind(worker);
+			worker.postMessage = (...args) => { loaded.then(() => post(...args)); };
+			return loaded;
+		};
+	}
 
 	const dotnetConfig = getConfig();
 
