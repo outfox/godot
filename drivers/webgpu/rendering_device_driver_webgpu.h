@@ -111,7 +111,9 @@ class RenderingDeviceDriverWebGPU : public RenderingDeviceDriver {
 		LocalVector<uint64_t> words;
 		uint32_t hash() const { return hash_murmur3_buffer(words.ptr(), words.size() * sizeof(uint64_t)); }
 		bool operator==(const LayoutKey &p_other) const {
-			return words.size() == p_other.words.size() && memcmp(words.ptr(), p_other.words.ptr(), words.size() * sizeof(uint64_t)) == 0;
+			// An empty key holds a null pointer, which memcmp must not receive even for zero bytes: GCC then assumes
+			// the pointer is not null and frees it without a check.
+			return words.size() == p_other.words.size() && (words.is_empty() || memcmp(words.ptr(), p_other.words.ptr(), words.size() * sizeof(uint64_t)) == 0);
 		}
 	};
 	Mutex layout_cache_mutex;
