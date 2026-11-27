@@ -48,7 +48,7 @@
 #include "modules/modules_enabled.gen.h" // IWYU pragma: keep. For mono.
 #include "modules/svg/image_loader_svg.h"
 
-Error EditorExportPlatformWeb::_extract_template(const String &p_template, const String &p_dir, const String &p_name, bool pwa, Vector<String> &r_libgodot_files, bool &r_webgpu) {
+Error EditorExportPlatformWeb::_extract_template(const String &p_template, const String &p_dir, const String &p_name, bool pwa, const String &p_libgodot_dir, bool &r_webgpu) {
 	Ref<FileAccess> io_fa;
 	zlib_filefunc_def io = zipio_create_io(&io_fa);
 	unzFile pkg = unzOpen2(p_template.utf8().get_data(), &io);
@@ -96,10 +96,7 @@ Error EditorExportPlatformWeb::_extract_template(const String &p_template, const
 
 		//write
 		const bool libgodot_file = file.begins_with("libgodot/");
-		String dst = p_dir.path_join(libgodot_file ? file : file.replace("godot", p_name));
-		if (libgodot_file) {
-			r_libgodot_files.push_back(dst);
-		}
+		String dst = libgodot_file ? p_libgodot_dir.path_join(file) : p_dir.path_join(file.replace("godot", p_name));
 		String dst_dir = dst.get_base_dir();
 		if (!DirAccess::exists(dst_dir)) {
 			Error err = DirAccess::make_dir_recursive_absolute(dst_dir);
@@ -123,35 +120,19 @@ Error EditorExportPlatformWeb::_extract_template(const String &p_template, const
 	return OK;
 }
 
-// 2dog: removes the build-only libgodot inputs this export extracted, plus directories they leave empty.
-Error EditorExportPlatformWeb::_remove_libgodot_files(const String &p_dir, const Vector<String> &p_files) {
-	const String libgodot_dir = p_dir.path_join("libgodot");
-	HashSet<String> dirs;
-	for (const String &file : p_files) {
-		Error err = DirAccess::remove_absolute(file);
-		if (err != OK && FileAccess::exists(file)) {
-			add_message(EXPORT_MESSAGE_ERROR, TTR("Export"), vformat(TTR("Could not remove file: \"%s\"."), file));
-			return err;
-		}
-		for (String dir = file.get_base_dir(); dir.begins_with(libgodot_dir); dir = dir.get_base_dir()) {
-			dirs.insert(dir);
-		}
-	}
+// 2dog: removes the temporary directory holding the build-only libgodot inputs on every exit path.
+struct LibGodotStagingCleanup {
+	String dir;
 
-	Vector<String> sorted_dirs;
-	for (const String &dir : dirs) {
-		sorted_dirs.push_back(dir);
-	}
-	sorted_dirs.sort();
-	for (int i = sorted_dirs.size() - 1; i >= 0; i--) {
-		Ref<DirAccess> da = DirAccess::open(sorted_dirs[i]);
-		if (da.is_valid() && da->get_files().is_empty() && da->get_directories().is_empty()) {
+	~LibGodotStagingCleanup() {
+		Ref<DirAccess> da = DirAccess::open(dir);
+		if (da.is_valid()) {
+			da->erase_contents_recursive();
 			da.unref();
-			DirAccess::remove_absolute(sorted_dirs[i]);
+			DirAccess::remove_absolute(dir);
 		}
 	}
-	return OK;
-}
+};
 
 Error EditorExportPlatformWeb::_write_or_error(const uint8_t *p_content, int p_size, String p_path) {
 	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::WRITE);
@@ -585,9 +566,11 @@ Error EditorExportPlatformWeb::export_project(const Ref<EditorExportPreset> &p_p
 	}
 
 	// Extract templates.
-	Vector<String> libgodot_files;
+	// 2dog: libgodot inputs are build-only; stage them outside the export folder so no host file is touched.
+	LibGodotStagingCleanup libgodot_staging;
+	libgodot_staging.dir = EditorPaths::get_singleton()->get_temp_dir().path_join("web_libgodot_" + itos(OS::get_singleton()->get_ticks_usec()));
 	bool webgpu = false;
-	Error error = _extract_template(template_path, base_dir, base_name, pwa, libgodot_files, webgpu);
+	Error error = _extract_template(template_path, base_dir, base_name, pwa, libgodot_staging.dir, webgpu);
 	if (error) {
 		// Message is supplied by the subroutine method.
 		return error;
@@ -691,8 +674,7 @@ Error EditorExportPlatformWeb::export_project(const Ref<EditorExportPreset> &p_p
 		}
 	}
 
-	// 2dog: libgodot inputs are build-only and must not ship in the export.
-	return _remove_libgodot_files(base_dir, libgodot_files);
+	return OK;
 }
 
 bool EditorExportPlatformWeb::poll_export() {
