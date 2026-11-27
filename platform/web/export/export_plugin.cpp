@@ -52,7 +52,7 @@
 #endif
 #include "modules/svg/image_loader_svg.h"
 
-Error EditorExportPlatformWeb::_extract_template(const String &p_template, const String &p_dir, const String &p_name, bool pwa, const String &p_libgodot_dir, bool &r_webgpu) {
+Error EditorExportPlatformWeb::_extract_template(const String &p_template, const String &p_dir, const String &p_name, bool pwa, bool &r_webgpu) {
 	Ref<FileAccess> io_fa;
 	zlib_filefunc_def io = zipio_create_io(&io_fa);
 	unzFile pkg = unzOpen2(p_template.utf8().get_data(), &io);
@@ -90,6 +90,10 @@ Error EditorExportPlatformWeb::_extract_template(const String &p_template, const
 			r_webgpu = true;
 			continue;
 		}
+		// 2dog: libgodot/ holds link inputs for .NET hosts, which take them from the template, never from an export.
+		if (file.begins_with("libgodot/")) {
+			continue;
+		}
 		Vector<uint8_t> data;
 		data.resize(info.uncompressed_size);
 
@@ -99,8 +103,7 @@ Error EditorExportPlatformWeb::_extract_template(const String &p_template, const
 		unzCloseCurrentFile(pkg);
 
 		//write
-		const bool libgodot_file = file.begins_with("libgodot/");
-		String dst = libgodot_file ? p_libgodot_dir.path_join(file) : p_dir.path_join(file.replace("godot", p_name));
+		String dst = p_dir.path_join(file.replace("godot", p_name));
 		String dst_dir = dst.get_base_dir();
 		if (!DirAccess::exists(dst_dir)) {
 			Error err = DirAccess::make_dir_recursive_absolute(dst_dir);
@@ -123,20 +126,6 @@ Error EditorExportPlatformWeb::_extract_template(const String &p_template, const
 	unzClose(pkg);
 	return OK;
 }
-
-// 2dog: removes the temporary directory holding the build-only libgodot inputs on every exit path.
-struct LibGodotStagingCleanup {
-	String dir;
-
-	~LibGodotStagingCleanup() {
-		Ref<DirAccess> da = DirAccess::open(dir);
-		if (da.is_valid()) {
-			da->erase_contents_recursive();
-			da.unref();
-			DirAccess::remove_absolute(dir);
-		}
-	}
-};
 
 Error EditorExportPlatformWeb::_write_or_error(const uint8_t *p_content, int p_size, String p_path) {
 	Ref<FileAccess> f = FileAccess::open(p_path, FileAccess::WRITE);
@@ -473,13 +462,15 @@ bool EditorExportPlatformWeb::has_valid_export_configuration(const Ref<EditorExp
 #ifdef MODULE_MONO_ENABLED
 	// 2dog: mirrors the managed ExportPlugin, which rejects playable C# web exports outside libgodot hosts.
 	// Pack exports do not pass through here, so the PCK/ZIP workflow stays available.
+	String sln_dir = GLOBAL_GET("dotnet/project/solution_directory");
+	sln_dir = sln_dir.begins_with("res://") ? sln_dir : "res://" + sln_dir;
 	if (!CoreGlobals::libgodot_host_instance && !OS::get_singleton()->get_cmdline_user_args().find("--2dog-host-pack") &&
-			FileAccess::exists("res://" + Path::get_csharp_project_name() + ".sln")) {
+			FileAccess::exists(sln_dir.path_join(Path::get_csharp_project_name() + ".sln"))) {
 		r_error += TTR("C# web exports from the Godot editor are not supported; publish a 2dog web host instead.") + "\n";
 		return false;
 	}
 	// 2dog: .NET web export remains experimental.
-	err +=TTR("Exporting to Web when using C#/.NET is experimental.") + "\n";
+	err += TTR("Exporting to Web when using C#/.NET is experimental.") + "\n";
 	if (extensions) {
 		r_error += TTR("Exporting C#/.NET with GDExtensions is currently not supported.") + "\n";
 		return false;
@@ -577,11 +568,8 @@ Error EditorExportPlatformWeb::export_project(const Ref<EditorExportPreset> &p_p
 	}
 
 	// Extract templates.
-	// 2dog: libgodot inputs are build-only; stage them outside the export folder so no host file is touched.
-	LibGodotStagingCleanup libgodot_staging;
-	libgodot_staging.dir = EditorPaths::get_singleton()->get_temp_dir().path_join("web_libgodot_" + itos(OS::get_singleton()->get_ticks_usec()));
 	bool webgpu = false;
-	Error error = _extract_template(template_path, base_dir, base_name, pwa, libgodot_staging.dir, webgpu);
+	Error error = _extract_template(template_path, base_dir, base_name, pwa, webgpu);
 	if (error) {
 		// Message is supplied by the subroutine method.
 		return error;
