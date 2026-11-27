@@ -15,7 +15,7 @@
          os.path.join(_src_dir, 'library_webgpu_generated_sig_info.js'),
 -        os.path.join(_src_dir, 'library_webgpu.js'),
 +        # 2dog: Emscripten 3.x exposes stack helpers as Wasm dependencies.
-+        os.path.join(_src_dir, 'library_webgpu_legacy.js' if shared.EMSCRIPTEN_VERSION_MAJOR < 4 else 'library_webgpu.js'),
++        os.path.join(_src_dir, 'library_webgpu_legacy.js' if getattr(shared, 'EMSCRIPTEN_VERSION_MAJOR', 4) < 4 else 'library_webgpu.js'),
      ]
 
      if 'CLOSURE_ARGS' in settings.keys():
