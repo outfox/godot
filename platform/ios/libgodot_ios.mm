@@ -176,6 +176,7 @@ int libgodot_ios_create(int p_argc, char *p_argv[], GDExtensionInitializationFun
 	ERR_FAIL_COND_V_MSG(p_argc < 1 || p_argc > 60, (int)ERR_INVALID_PARAMETER, "libgodot_ios_create needs 1 to 60 arguments.");
 
 	CoreGlobals::global_init_func_libgodot = p_init_func;
+	CoreGlobals::engine_reinit_enabled = true;
 	CoreGlobals::libgodot_host_instance = true;
 
 	os = new OS_IOS();
