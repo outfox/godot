@@ -115,11 +115,11 @@ void libgodot_destroy_godot_instance(GDExtensionObjectPtr p_godot_instance) {
 	}
 }
 
-// 2dog: entry point used by the managed browser main loop.
-extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
+static GDExtensionBool web_iteration(double p_delta_seconds) {
 	ERR_FAIL_NULL_V(instance, true);
 	ERR_FAIL_NULL_V(os, true);
 	ERR_FAIL_NULL_V(DisplayServerWeb::get_singleton(), true);
+	[[maybe_unused]] const bool automatic = p_delta_seconds < 0.0;
 #ifndef PROXY_TO_PTHREAD_ENABLED
 	uint64_t current_ticks = os->get_ticks_usec();
 #endif
@@ -128,14 +128,14 @@ extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
 	if (force_draw) {
 		Main::force_redraw();
 #ifndef PROXY_TO_PTHREAD_ENABLED
-	} else if (current_ticks < target_ticks) {
+	} else if (automatic && current_ticks < target_ticks) {
 		return false;
 #endif
 	}
 
 #ifndef PROXY_TO_PTHREAD_ENABLED
 	int max_fps = Engine::get_singleton()->get_max_fps();
-	if (max_fps > 0) {
+	if (automatic && max_fps > 0) {
 		if (current_ticks - target_ticks > 1000000) {
 			// 2dog: reset accumulated delay after focus loss.
 			target_ticks = current_ticks;
@@ -148,14 +148,14 @@ extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
 	// 2dog: avoid re-rendering and flooding the GPU queue while async pipelines finish compiling.
 	if (waiting_for_pipelines) {
 		RenderingDevice *rd = RenderingDevice::get_singleton();
-		if (rd && rd->has_pending_pipelines()) {
+		waiting_for_pipelines = rd && rd->has_pending_pipelines();
+		if (automatic && waiting_for_pipelines) {
 			return false;
 		}
-		waiting_for_pipelines = false;
 	}
 
 	// 2dog: cap in-flight GPU frames so input and simulation stay in sync with what is on screen.
-	if (RenderingDevice *rd = RenderingDevice::get_singleton(); rd && rd->is_gpu_queue_full()) {
+	if (RenderingDevice *rd = RenderingDevice::get_singleton(); automatic && rd && rd->is_gpu_queue_full()) {
 		gpu_queue_skips++;
 		return false;
 	}
@@ -164,7 +164,7 @@ extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
 	const uint64_t iter_start = is_print_verbose_enabled() ? os->get_ticks_usec() : 0;
 	const uint64_t phys_before = is_print_verbose_enabled() ? Engine::get_singleton()->get_physics_frames() : 0;
 	const uint64_t skipped_draws = RSG::pipeline_skipped_draws;
-	const bool exit = os->main_loop_iterate();
+	const bool exit = os->main_loop_iterate(p_delta_seconds);
 
 	if (is_print_verbose_enabled()) {
 		const uint64_t iter_end = os->get_ticks_usec();
@@ -199,4 +199,13 @@ extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
 		MAIN_THREAD_ASYNC_EM_ASM({ dispatchEvent(new CustomEvent('2dog:frame', { detail : $0 })); }, ++reported_frames);
 	}
 	return exit;
+}
+
+extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration() {
+	return web_iteration(-1.0);
+}
+
+extern "C" LIBGODOT_API GDExtensionBool libgodot_web_iteration_with_delta(double p_delta_seconds) {
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_delta_seconds) || p_delta_seconds < 0.0, true, "Iteration delta must be finite and nonnegative.");
+	return web_iteration(p_delta_seconds);
 }

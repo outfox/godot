@@ -42,6 +42,7 @@ void GodotInstance::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("start"), &GodotInstance::start);
 	ClassDB::bind_method(D_METHOD("is_started"), &GodotInstance::is_started);
 	ClassDB::bind_method(D_METHOD("iteration"), &GodotInstance::iteration);
+	ClassDB::bind_method(D_METHOD("iteration_with_delta", "delta_seconds"), &GodotInstance::iteration_with_delta);
 	ClassDB::bind_method(D_METHOD("focus_in"), &GodotInstance::focus_in);
 	ClassDB::bind_method(D_METHOD("focus_out"), &GodotInstance::focus_out);
 	ClassDB::bind_method(D_METHOD("pause"), &GodotInstance::pause);
@@ -90,10 +91,19 @@ bool GodotInstance::is_started() {
 }
 
 bool GodotInstance::iteration() {
+	return _iteration(-1.0);
+}
+
+bool GodotInstance::iteration_with_delta(double p_delta_seconds) {
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_delta_seconds) || p_delta_seconds < 0.0, true, "Iteration delta must be finite and nonnegative.");
+	return _iteration(p_delta_seconds);
+}
+
+bool GodotInstance::_iteration(double p_delta_seconds) {
 	ERR_FAIL_COND_V_MSG(!started, true, "GodotInstance must be started before iteration.");
 
 	DisplayServer::get_singleton()->process_events();
-	return Main::iteration();
+	return Main::iteration(p_delta_seconds);
 }
 
 void GodotInstance::stop() {

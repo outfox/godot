@@ -93,6 +93,8 @@ class MainTimerSync {
 
 	// logical game time since last physics timestep
 	double time_accum = 0;
+	bool host_timed = false;
+	void reset_step_history();
 
 	// current difference between wall clock time and reported sum of process_steps
 	double time_deficit = 0;
@@ -142,4 +144,5 @@ public:
 
 	// advance one frame, return timesteps to take
 	MainFrameTime advance(double p_physics_step, int p_physics_ticks_per_second);
+	MainFrameTime advance_with_delta(double p_delta_seconds, int p_physics_ticks_per_second, int p_max_physics_steps);
 };

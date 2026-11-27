@@ -50,16 +50,11 @@
 // Guards the prewarm queue and every WGPrewarm: results arrive on the device thread, which may not be rendering.
 static Mutex prewarm_mutex;
 static uint32_t pending_async_prewarms = 0;
-static uint32_t in_flight_gpu_frames = 0;
 static RenderingDeviceDriverWebGPU *active_prewarm_driver = nullptr;
 // Cap concurrent async pipeline compiles to avoid exhausting browser GPU-process compiler memory (Firefox DXC).
 static constexpr uint32_t MAX_INFLIGHT_PREWARMS = 16;
 static constexpr uint32_t MAX_INFLIGHT_PREWARMS_FIREFOX = 4;
 static uint32_t max_inflight_prewarms = MAX_INFLIGHT_PREWARMS;
-// Cap presented frames queued ahead of the GPU so input cannot drift behind rendered frames.
-// Firefox polls queue.onSubmittedWorkDone() on a 100 ms timer when submissions pause, trapping a cap in 100 ms stalls.
-static constexpr uint32_t MAX_INFLIGHT_GPU_FRAMES = 2;
-static uint32_t max_inflight_gpu_frames = MAX_INFLIGHT_GPU_FRAMES;
 #endif
 #include <cstdio>
 #include <cstdlib>
@@ -93,11 +88,9 @@ static constexpr WGPUCallbackMode WEBGPU_CALLBACK_MODE = WGPUCallbackMode_AllowP
 // WGPUQueueWorkDoneCallback typedef select the matching one.
 static void _fence_work_done_body(void *p_userdata1, void *p_userdata2) {
 #ifdef WEB_ENABLED
-	if (p_userdata2) {
-		MutexLock lock(prewarm_mutex);
-		if (active_prewarm_driver == p_userdata2 && in_flight_gpu_frames > 0) {
-			in_flight_gpu_frames--;
-		}
+	SafeRefCount *presentation_refs = static_cast<SafeRefCount *>(p_userdata2);
+	if (presentation_refs && presentation_refs->unref()) {
+		memdelete(presentation_refs);
 	}
 #endif
 	WGFence *fence = (WGFence *)p_userdata1;
@@ -223,12 +216,14 @@ RenderingDeviceDriverWebGPU::RenderingDeviceDriverWebGPU(RenderingContextDriverW
 		MutexLock lock(prewarm_mutex);
 		active_prewarm_driver = this;
 		pending_async_prewarms = 0;
-		in_flight_gpu_frames = 0;
 		const bool is_firefox = EM_ASM_INT({ return typeof navigator !== "undefined" && /firefox/i.test(navigator.userAgent || "") ? 1 : 0; }) != 0;
 		max_inflight_prewarms = is_firefox ? MAX_INFLIGHT_PREWARMS_FIREFOX : MAX_INFLIGHT_PREWARMS;
-		max_inflight_gpu_frames = is_firefox ? 0 : MAX_INFLIGHT_GPU_FRAMES;
+		// Firefox can delay completion callbacks by 100 ms when submissions pause.
+		if (!is_firefox) {
+			presentation_refs = memnew(SafeRefCount);
+			presentation_refs->init();
+		}
 	}
-	print_verbose(vformat("WebGPU: max_inflight_prewarms=%d max_inflight_gpu_frames=%d", (int)max_inflight_prewarms, (int)max_inflight_gpu_frames));
 #endif
 }
 
@@ -241,7 +236,9 @@ RenderingDeviceDriverWebGPU::~RenderingDeviceDriverWebGPU() {
 		}
 		prewarm_queue.clear();
 		pending_async_prewarms = 0;
-		in_flight_gpu_frames = 0;
+	}
+	if (presentation_refs && presentation_refs->unref()) {
+		memdelete(presentation_refs);
 	}
 #endif
 	for (const KeyValue<LayoutKey, WGPUPipelineLayout> &kv : pipeline_layout_cache) {
@@ -370,6 +367,12 @@ Error RenderingDeviceDriverWebGPU::initialize(uint32_t p_device_index, uint32_t 
 	ERR_FAIL_COND_V(queue == nullptr, ERR_CANT_CREATE);
 
 	frame_count = p_frame_count;
+#ifdef WEB_ENABLED
+	if (is_print_verbose_enabled()) {
+		MutexLock lock(prewarm_mutex);
+		print_line(vformat("WebGPU: max_inflight_prewarms=%d max_inflight_gpu_frames=%d", max_inflight_prewarms, presentation_refs ? frame_count : 0));
+	}
+#endif
 
 	// Query device limits.
 	_check_capabilities();
@@ -2677,40 +2680,6 @@ Error RenderingDeviceDriverWebGPU::command_queue_execute_and_present(CommandQueu
 #endif // WEBGPU_VERBOSE
 	}
 
-	// Signal fence when GPU work completes via async callback.
-	if (p_cmd_fence) {
-		WGFence *fence = (WGFence *)(p_cmd_fence.id);
-		if (fence) {
-#ifndef WEB_ENABLED
-			// WaitAnyOnly callbacks only fire when waited on, so finish the previous one first.
-			if (fence->references.get() > 1) {
-				fence_wait(p_cmd_fence);
-			}
-#endif
-			fence->references.increment();
-			WGPUQueueWorkDoneCallbackInfo cb = {};
-			// Overload set (see definitions near the top of this file): the
-			// port's WGPUQueueWorkDoneCallback typedef selects the matching
-			// signature. A "no matching conversion" error here means a new
-			// emdawnwebgpu changed the callback shape again.
-			cb.callback = _fence_work_done_callback;
-			cb.userdata1 = fence;
-#ifdef WEB_ENABLED
-			const bool track_frame = p_swap_chains.size() > 0 && max_inflight_gpu_frames > 0;
-			if (track_frame) {
-				MutexLock lock(prewarm_mutex);
-				in_flight_gpu_frames++;
-			}
-			cb.userdata2 = track_frame ? this : nullptr;
-			cb.mode = WGPUCallbackMode_AllowSpontaneous;
-#else
-			cb.userdata2 = nullptr;
-			cb.mode = WGPUCallbackMode_WaitAnyOnly;
-#endif
-			fence->future = wgpuQueueOnSubmittedWorkDone(queue, cb);
-		}
-	}
-
 	// Present swap chains.
 	for (uint32_t i = 0; i < p_swap_chains.size(); i++) {
 		WGSwapChain *sc = (WGSwapChain *)(p_swap_chains[i].id);
@@ -2748,6 +2717,38 @@ Error RenderingDeviceDriverWebGPU::command_queue_execute_and_present(CommandQueu
 				wgpuTextureRelease(sc->current_texture);
 				sc->current_texture = nullptr;
 			}
+		}
+	}
+
+	// Register after presentation so the fence includes the threaded browser canvas copy.
+	if (p_cmd_fence) {
+		WGFence *fence = (WGFence *)(p_cmd_fence.id);
+		if (fence) {
+#ifndef WEB_ENABLED
+			// WaitAnyOnly callbacks only fire when waited on, so finish the previous one first.
+			if (fence->references.get() > 1) {
+				fence_wait(p_cmd_fence);
+			}
+#endif
+			fence->references.increment();
+			WGPUQueueWorkDoneCallbackInfo cb = {};
+			// Overload set (see definitions near the top of this file): the
+			// port's WGPUQueueWorkDoneCallback typedef selects the matching
+			// signature. A "no matching conversion" error here means a new
+			// emdawnwebgpu changed the callback shape again.
+			cb.callback = _fence_work_done_callback;
+			cb.userdata1 = fence;
+#ifdef WEB_ENABLED
+			if (presentation_refs && p_swap_chains.size() > 0) {
+				presentation_refs->ref();
+				cb.userdata2 = presentation_refs;
+			}
+			cb.mode = WGPUCallbackMode_AllowSpontaneous;
+#else
+			cb.userdata2 = nullptr;
+			cb.mode = WGPUCallbackMode_WaitAnyOnly;
+#endif
+			fence->future = wgpuQueueOnSubmittedWorkDone(queue, cb);
 		}
 	}
 
@@ -5793,15 +5794,14 @@ bool RenderingDeviceDriverWebGPU::has_pending_pipelines() {
 
 bool RenderingDeviceDriverWebGPU::is_gpu_queue_full() {
 #ifdef WEB_ENABLED
-	if (max_inflight_gpu_frames == 0) {
+	if (!presentation_refs) {
 		return false;
 	}
 	WGPUInstance inst = context_driver ? context_driver->get_instance() : nullptr;
 	if (inst) {
 		wgpuInstanceProcessEvents(inst);
 	}
-	MutexLock lock(prewarm_mutex);
-	return in_flight_gpu_frames >= max_inflight_gpu_frames;
+	return presentation_refs->get() - 1 >= frame_count;
 #else
 	return false;
 #endif

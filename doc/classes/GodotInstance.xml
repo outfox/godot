@@ -33,6 +33,14 @@
 				Runs a single iteration of the main loop. Returns [code]true[/code] if the engine is attempting to quit.
 			</description>
 		</method>
+		<method name="iteration_with_delta">
+			<return type="bool" />
+			<param index="0" name="delta_seconds" type="float" />
+			<description>
+				Runs one main loop iteration using the supplied finite, nonnegative elapsed seconds. A zero delta still runs the idle pass. Physics uses fixed ticks and respects [member Engine.max_physics_steps_per_frame]. Excess whole ticks are discarded. Idle and rendering use the full interval scaled by engine time scale.
+				Returns [code]true[/code] when the engine requests exit.
+			</description>
+		</method>
 		<method name="pause">
 			<return type="void" />
 			<description>

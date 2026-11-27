@@ -79,7 +79,7 @@ public:
 	void initialize_joypads() override;
 
 	MainLoop *get_main_loop() const override;
-	bool main_loop_iterate();
+	bool main_loop_iterate(double p_delta_seconds = -1.0);
 
 	Error execute(const String &p_path, const List<String> &p_arguments, String *r_pipe = nullptr, int *r_exitcode = nullptr, bool read_stderr = false, Mutex *p_pipe_mutex = nullptr, bool p_open_console = false) override;
 	Dictionary execute_with_pipe(const String &p_path, const List<String> &p_arguments, bool p_blocking = true) override;
