@@ -2047,7 +2047,7 @@ uint64_t RenderingDevice::external_texture_get_memory_size(RID p_texture) {
 	Texture *tex = texture_owner.get_or_null(p_texture);
 	ERR_FAIL_NULL_V(tex, 0);
 	ERR_FAIL_COND_V(tex->external_share_handle_type == EXTERNAL_TEXTURE_SHARE_HANDLE_TYPE_NONE, 0);
-	return driver->texture_get_allocation_size(tex->driver_id);
+	return driver->external_texture_get_memory_size(tex->driver_id);
 }
 
 Error RenderingDevice::external_texture_present(RID p_from_texture, RID p_to_external_texture) {
