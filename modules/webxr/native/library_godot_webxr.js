@@ -962,7 +962,8 @@ autoAddDeps(GodotWebXR, '$GodotWebXR');
 mergeInto(LibraryManager.library, GodotWebXR);
 
 // 2dog: the XR frame loop replaces MainLoop.requestAnimationFrame, which has no public counterpart. Emscripten 6
-// marks $MainLoop internal and warns about user libraries that depend on it; state that this use is intended.
+// marks $MainLoop internal and warns when a user library symbol depends on it. Exempt only this wrapper, so any
+// other dependency on $MainLoop still warns.
 if (LibraryManager.library['$MainLoop__internal']) {
-	LibraryManager.library['$MainLoop__internal'] = false;
+	LibraryManager.library['$GodotWebXRMainLoop__user'] = false;
 }
