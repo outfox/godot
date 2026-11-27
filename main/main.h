@@ -79,7 +79,7 @@ public:
 	static void test_cleanup();
 	static int start();
 
-	static bool iteration();
+	static bool iteration(double p_delta_seconds = -1.0);
 	static void force_redraw();
 
 	struct FrameTimings {

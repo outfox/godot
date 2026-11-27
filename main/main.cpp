@@ -5185,7 +5185,7 @@ static void _flush_agile_input(bool p_poll) {
 // Return false means iterating further, returning true means `OS::run`
 // will terminate the program. In case of failure, the OS exit code needs
 // to be set explicitly here (defaults to EXIT_SUCCESS).
-bool Main::iteration() {
+bool Main::iteration(double p_delta_seconds) {
 	GodotProfileZone("Main::iteration");
 	GodotProfileZoneGroupedFirst(_profile_zone, "prepare");
 	iterating++;
@@ -5202,7 +5202,9 @@ bool Main::iteration() {
 
 	const double time_scale = Engine::get_singleton()->get_effective_time_scale();
 
-	MainFrameTime advance = main_timer_sync.advance(physics_step, physics_ticks_per_second);
+	const int max_physics_steps = Engine::get_singleton()->get_user_max_physics_steps_per_frame();
+	const bool host_timed = p_delta_seconds >= 0.0;
+	MainFrameTime advance = host_timed ? main_timer_sync.advance_with_delta(p_delta_seconds, physics_ticks_per_second, max_physics_steps) : main_timer_sync.advance(physics_step, physics_ticks_per_second);
 	double process_step = advance.process_step;
 	double scaled_step = process_step * time_scale;
 
@@ -5219,7 +5221,6 @@ bool Main::iteration() {
 
 	last_ticks = ticks;
 
-	const int max_physics_steps = Engine::get_singleton()->get_user_max_physics_steps_per_frame();
 	if (fixed_fps == -1 && advance.physics_steps > max_physics_steps) {
 		process_step -= (advance.physics_steps - max_physics_steps) * physics_step;
 		advance.physics_steps = max_physics_steps;
@@ -5474,7 +5475,9 @@ bool Main::iteration() {
 	bool wake_for_events = scene_tree && scene_tree->is_accessibility_enabled();
 
 	GodotProfileZoneGrouped(_profile_zone, "OS::add_frame_delay");
-	OS::get_singleton()->add_frame_delay(DisplayServer::get_singleton()->window_can_draw(), wake_for_events);
+	if (!host_timed) {
+		OS::get_singleton()->add_frame_delay(DisplayServer::get_singleton()->window_can_draw(), wake_for_events);
+	}
 
 #ifdef TOOLS_ENABLED
 	if (auto_build_solutions) {

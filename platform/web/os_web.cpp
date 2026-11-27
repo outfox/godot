@@ -85,7 +85,7 @@ void OS_Web::fs_sync_callback() {
 	get_singleton()->idb_is_syncing = false;
 }
 
-bool OS_Web::main_loop_iterate() {
+bool OS_Web::main_loop_iterate(double p_delta_seconds) {
 	GodotProfileFrameMark;
 	GodotProfileZone("OS_Web::main_loop_iterate");
 	if (is_userfs_persistent() && idb_needs_sync && !idb_is_syncing) {
@@ -96,7 +96,7 @@ bool OS_Web::main_loop_iterate() {
 
 	DisplayServer::get_singleton()->process_events();
 
-	return Main::iteration();
+	return Main::iteration(p_delta_seconds);
 }
 
 void OS_Web::delete_main_loop() {

@@ -335,6 +335,7 @@ def configure(env: "SConsEnvironment"):
             "_libgodot_create_godot_instance",
             "_libgodot_destroy_godot_instance",
             "_libgodot_web_iteration",
+            "_libgodot_web_iteration_with_delta",
         ]
 
     # Run the main application in a web worker
