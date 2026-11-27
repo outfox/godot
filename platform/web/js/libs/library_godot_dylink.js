@@ -5,8 +5,9 @@
 // 2dog: the host must export their imports because Emscripten's dynamic linker requires relocatable builds.
 const GodotDylink = {
 	$GodotDylink__deps: ['$addFunction', '$updateTableMap', '$functionsInTableMap', '$wasmTable', '$alignMemory', '$zeroMemory', '$UTF8ArrayToString', 'malloc'],
-	// 2dog: threaded builds: each pthread instantiates the loaded side modules before its entry point runs.
-	$GodotDylink__postset: 'if (typeof PThread !== "undefined") { PThread.tlsInitFunctions.push(() => wasmExports["godot_web_sync_side_modules"]()); }',
+	// 2dog: threaded builds: each pthread instantiates the loaded side modules before its entry point runs. The sync
+	// keeps thread-local state, so it runs after the thread's TLS setup; a tlsInitFunctions entry would run before it.
+	$GodotDylink__postset: 'if (typeof PThread !== "undefined") { const initTLS = PThread.threadInitTLS; PThread.threadInitTLS = () => { initTLS(); wasmExports["godot_web_sync_side_modules"](); }; }',
 	$GodotDylink: {
 		libs: [null],
 		lastError: '',

@@ -50,6 +50,10 @@ class RenderingDeviceDriverWebGPU : public RenderingDeviceDriver {
 	WGPUQueue queue = nullptr;
 
 	uint32_t frame_count = 1;
+#ifdef WEB_ENABLED
+	// One reference for this device and one for each pending presentation fence.
+	SafeRefCount *presentation_refs = nullptr;
+#endif
 	uint32_t frame_index = 0;
 	uint32_t frames_drawn = 0;
 
