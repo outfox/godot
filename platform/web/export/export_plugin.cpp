@@ -34,6 +34,7 @@
 #include "run_icon_svg.gen.h"
 
 #include "core/config/project_settings.h"
+#include "core/core_globals.h"
 #include "core/io/dir_access.h"
 #include "core/io/zip_io.h"
 #include "core/os/os.h"
@@ -46,6 +47,9 @@
 #include "scene/resources/image_texture.h"
 
 #include "modules/modules_enabled.gen.h" // IWYU pragma: keep. For mono.
+#ifdef MODULE_MONO_ENABLED
+#include "modules/mono/utils/path_utils.h"
+#endif
 #include "modules/svg/image_loader_svg.h"
 
 Error EditorExportPlatformWeb::_extract_template(const String &p_template, const String &p_dir, const String &p_name, bool pwa, const String &p_libgodot_dir, bool &r_webgpu) {
@@ -467,8 +471,15 @@ bool EditorExportPlatformWeb::has_valid_export_configuration(const Ref<EditorExp
 	bool thread_support = (bool)p_preset->get("variant/thread_support");
 
 #ifdef MODULE_MONO_ENABLED
+	// 2dog: mirrors the managed ExportPlugin, which rejects playable C# web exports outside libgodot hosts.
+	// Pack exports do not pass through here, so the PCK/ZIP workflow stays available.
+	if (!CoreGlobals::libgodot_host_instance && !OS::get_singleton()->get_cmdline_user_args().find("--2dog-host-pack") &&
+			FileAccess::exists("res://" + Path::get_csharp_project_name() + ".sln")) {
+		r_error += TTR("C# web exports from the Godot editor are not supported; publish a 2dog web host instead.") + "\n";
+		return false;
+	}
 	// 2dog: .NET web export remains experimental.
-	err += TTR("Exporting to Web when using C#/.NET is experimental.") + "\n";
+	err +=TTR("Exporting to Web when using C#/.NET is experimental.") + "\n";
 	if (extensions) {
 		r_error += TTR("Exporting C#/.NET with GDExtensions is currently not supported.") + "\n";
 		return false;
