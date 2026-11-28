@@ -332,7 +332,7 @@ public:
 		bool has_data = false; ///< True after first successful readback.
 		bool cancelled = false; ///< Source freed while map pending; callback will clean up.
 	};
-	HashMap<uint64_t, ReadbackEntry *> _readback_cache; ///< Keyed by source buffer/texture pointer.
+	HashMap<uint64_t, ReadbackEntry *> _readback_cache; ///< Keyed by source texture pointer and layer.
 	/// Async map callback — copies GPU data to shadow buffer.
 	static void _readback_map_cb(WGPUMapAsyncStatus p_status, WGPUStringView p_message, void *p_userdata1, void *p_userdata2);
 

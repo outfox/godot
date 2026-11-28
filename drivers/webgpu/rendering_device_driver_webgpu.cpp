@@ -1208,8 +1208,9 @@ bool RenderingDeviceDriverWebGPU::buffer_is_readable(BufferID p_buffer) {
 			wgpuInstanceProcessEvents(inst);
 		}
 	}
-	// A map that was never initiated is neither pending nor complete.
-	return !buf->map_pending && buf->map_complete;
+	// A map that was never initiated is neither pending nor complete. Like buffer_map(), also accept a buffer that
+	// is mapped while its callback has not been delivered yet.
+	return buf->map_pending ? wgpuBufferGetMapState(buf->handle) == WGPUBufferMapState_Mapped : buf->map_complete;
 }
 
 uint32_t RenderingDeviceDriverWebGPU::texture_get_gpu_pixel_size(TextureID p_texture) {

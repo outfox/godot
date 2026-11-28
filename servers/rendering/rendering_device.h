@@ -467,7 +467,8 @@ public:
 	List<PendingDownload> pending_downloads;
 
 	// 2dog: buffer_get_data() on async drivers: the latest completed whole-buffer readback of a buffer and the
-	// staging buffer its next one reuses. The staging buffer is released after a while without reads.
+	// staging buffer its next one reuses. The staging buffer is released after a while without reads; the result
+	// stays until the buffer is freed, so a reader slower than that still gets one.
 	struct BufferReadback {
 		Vector<uint8_t> data;
 		RDD::BufferID staging;

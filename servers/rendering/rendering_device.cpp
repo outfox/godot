@@ -1612,9 +1612,9 @@ void RenderingDevice::_pending_downloads_deliver() {
 	// Callbacks may queue new downloads; those are not initiated yet and stay pending.
 	for (List<PendingDownload>::Element *E = pending_downloads.front(); E;) {
 		List<PendingDownload>::Element *next = E->next();
+		// Results are delivered in request order, so a download waits for the ones queued before it.
 		if (!E->get().map_initiated || !driver->buffer_is_readable(E->get().staging)) {
-			E = next;
-			continue;
+			break;
 		}
 
 		PendingDownload download = E->get();
