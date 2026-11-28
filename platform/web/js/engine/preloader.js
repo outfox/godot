@@ -34,9 +34,9 @@ const Preloader = /** @constructor */ function () { // eslint-disable-line no-un
 			loaded: 0,
 			done: false,
 		};
-		function consume(response, buffered) {
+		function consume(response) {
 			const tr = getTrackedResponse(response, tracker[file]);
-			if (raw && !buffered) {
+			if (raw) {
 				return Promise.resolve(tr);
 			}
 			return tr.arrayBuffer();
@@ -56,10 +56,16 @@ const Preloader = /** @constructor */ function () { // eslint-disable-line no-un
 				if (!response.ok || !response.body) {
 					return plain();
 				}
-				// Hosts may already decode the response; inflating it again fails, so use the plain file then.
-				return consume(new Response(response.body.pipeThrough(new DecompressionStream('gzip'))), true).then(function (buffer) {
-					return raw ? new Response(buffer) : buffer;
-				}, function () {
+				// 2dog: a host that sends Content-Encoding has the browser inflate the body already.
+				if (response.headers.get('Content-Encoding')) {
+					return consume(response);
+				}
+				const inflated = consume(new Response(response.body.pipeThrough(new DecompressionStream('gzip'))));
+				// 2dog: buffered loads retry the plain file when the body does not inflate; streamed ones report the error.
+				if (raw) {
+					return inflated;
+				}
+				return inflated.catch(function () {
 					tracker[file].loaded = 0;
 					return plain();
 				});
