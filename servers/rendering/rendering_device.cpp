@@ -1503,32 +1503,34 @@ Error RenderingDevice::buffer_get_data_async(RID p_buffer, const Callable &p_cal
 Vector<uint8_t> RenderingDevice::_buffer_get_data_cached(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size) {
 	_check_transfer_worker_buffer(p_buffer);
 
-	bool refresh_pending = false;
-	for (const PendingDownload &download : pending_downloads) {
-		if (download.cache_buffer == p_buffer_rid) {
-			refresh_pending = true;
-			break;
+	BufferReadback &readback = buffer_readbacks[p_buffer_rid];
+	readback.last_read_frame = frames_drawn;
+	if (!readback.pending) {
+		if (!readback.staging) {
+			readback.staging = driver->buffer_create(p_buffer->size, RDD::BUFFER_USAGE_TRANSFER_TO_BIT, RDD::MEMORY_ALLOCATION_TYPE_CPU, frames_drawn);
+			ERR_FAIL_COND_V(!readback.staging, Vector<uint8_t>());
 		}
-	}
-	if (!refresh_pending) {
 		// The whole buffer is read back, so one pending request covers every range.
-		ERR_FAIL_COND_V(_buffer_queue_pending_download(p_buffer_rid, p_buffer, 0, p_buffer->size, Callable(), true) != OK, Vector<uint8_t>());
+		ERR_FAIL_COND_V(_buffer_queue_pending_download(p_buffer_rid, p_buffer, 0, p_buffer->size, Callable(), readback.staging) != OK, Vector<uint8_t>());
+		readback.pending = true;
 	}
 
 	// Returns the last completed readback, so it lags one request behind; empty until the first one lands.
-	const Vector<uint8_t> *cached = buffer_readback_cache.getptr(p_buffer_rid);
 	Vector<uint8_t> result;
-	if (cached != nullptr && (uint64_t)p_offset + p_size <= (uint64_t)cached->size()) {
+	if ((uint64_t)p_offset + p_size <= (uint64_t)readback.data.size()) {
 		result.resize(p_size);
-		memcpy(result.ptrw(), cached->ptr() + p_offset, p_size);
+		memcpy(result.ptrw(), readback.data.ptr() + p_offset, p_size);
 	}
 	return result;
 }
 
-Error RenderingDevice::_buffer_queue_pending_download(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size, const Callable &p_callback, bool p_cache_result) {
-	// 2dog: The staging buffer is dedicated to this request, so it outlives the frame slot that records the copy.
-	RDD::BufferID staging = driver->buffer_create(p_size, RDD::BUFFER_USAGE_TRANSFER_TO_BIT, RDD::MEMORY_ALLOCATION_TYPE_CPU, frames_drawn);
-	ERR_FAIL_COND_V(!staging, ERR_CANT_CREATE);
+Error RenderingDevice::_buffer_queue_pending_download(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size, const Callable &p_callback, RDD::BufferID p_cache_staging) {
+	// 2dog: The staging buffer is not a pooled block, so it outlives the frame slot that records the copy.
+	RDD::BufferID staging = p_cache_staging;
+	if (!staging) {
+		staging = driver->buffer_create(p_size, RDD::BUFFER_USAGE_TRANSFER_TO_BIT, RDD::MEMORY_ALLOCATION_TYPE_CPU, frames_drawn);
+		ERR_FAIL_COND_V(!staging, ERR_CANT_CREATE);
+	}
 
 	RDD::BufferCopyRegion region;
 	region.src_offset = p_offset;
@@ -1545,8 +1547,9 @@ Error RenderingDevice::_buffer_queue_pending_download(RID p_buffer_rid, Buffer *
 	download.staging = staging;
 	download.callback = p_callback;
 	download.size = p_size;
-	if (p_cache_result) {
+	if (p_cache_staging) {
 		download.cache_buffer = p_buffer_rid;
+		download.owns_staging = false;
 	}
 	pending_downloads.push_back(download);
 	return OK;
@@ -1619,9 +1622,15 @@ void RenderingDevice::_pending_downloads_deliver() {
 		E = next;
 
 		const uint8_t *buffer_data = driver->buffer_map(download.staging);
+		BufferReadback *readback = download.owns_staging ? nullptr : buffer_readbacks.getptr(download.cache_buffer);
+		if (readback != nullptr) {
+			readback->pending = false;
+		}
 		if (buffer_data == nullptr) {
 			ERR_PRINT("Failed to map the staging buffer of an asynchronous download.");
-			driver->buffer_free(download.staging);
+			if (download.owns_staging) {
+				driver->buffer_free(download.staging);
+			}
 			continue;
 		}
 
@@ -1637,16 +1646,24 @@ void RenderingDevice::_pending_downloads_deliver() {
 		}
 
 		driver->buffer_unmap(download.staging);
-		// The map only completes after the copy ran, so the buffer is no longer in use by the GPU.
-		driver->buffer_free(download.staging);
+		if (download.owns_staging) {
+			// The map only completes after the copy ran, so the buffer is no longer in use by the GPU.
+			driver->buffer_free(download.staging);
+		}
 
-		if (download.cache_buffer.is_valid()) {
-			// Skip buffers freed while the download was in flight; their RID no longer resolves.
-			if (_get_buffer_from_owner(download.cache_buffer) != nullptr) {
-				buffer_readback_cache[download.cache_buffer] = packed_byte_array;
-			}
-		} else {
+		if (readback != nullptr) {
+			readback->data = packed_byte_array;
+		} else if (download.callback.is_valid()) {
 			download.callback.call(packed_byte_array);
+		}
+	}
+
+	// Staging buffers of buffers nobody reads any more are released; the last result stays available.
+	for (KeyValue<RID, BufferReadback> &E : buffer_readbacks) {
+		BufferReadback &readback = E.value;
+		if (readback.staging && !readback.pending && frames_drawn - readback.last_read_frame > BUFFER_READBACK_IDLE_FRAMES) {
+			driver->buffer_free(readback.staging);
+			readback.staging = RDD::BufferID();
 		}
 	}
 }
@@ -8235,7 +8252,19 @@ void RenderingDevice::_free_internal(RID p_id) {
 	}
 #endif
 
-	buffer_readback_cache.erase(p_id);
+	if (BufferReadback *readback = buffer_readbacks.getptr(p_id)) {
+		// 2dog: a download still in flight takes its staging buffer along and frees it on delivery.
+		for (PendingDownload &download : pending_downloads) {
+			if (download.cache_buffer == p_id) {
+				download.owns_staging = true;
+				readback->staging = RDD::BufferID();
+			}
+		}
+		if (readback->staging) {
+			driver->buffer_free(readback->staging);
+		}
+		buffer_readbacks.erase(p_id);
+	}
 
 	// Push everything so it's disposed of next time this frame index is processed (means, it's safe to do it).
 	if (texture_owner.owns(p_id)) {
@@ -9751,10 +9780,17 @@ void RenderingDevice::finalize() {
 
 	// 2dog: Drop pending downloads without calling back; their callbacks are never delivered.
 	for (const PendingDownload &download : pending_downloads) {
-		driver->buffer_free(download.staging);
+		if (download.owns_staging) {
+			driver->buffer_free(download.staging);
+		}
 	}
 	pending_downloads.clear();
-	buffer_readback_cache.clear();
+	for (const KeyValue<RID, BufferReadback> &E : buffer_readbacks) {
+		if (E.value.staging) {
+			driver->buffer_free(E.value.staging);
+		}
+	}
+	buffer_readbacks.clear();
 
 	while (vertex_formats.size()) {
 		HashMap<VertexFormatID, VertexDescriptionCache>::Iterator temp = vertex_formats.begin();

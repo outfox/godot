@@ -455,7 +455,8 @@ public:
 		RDD::BufferID staging;
 		bool map_initiated = false;
 		Callable callback;
-		RID cache_buffer; // Valid when the result refreshes buffer_readback_cache instead of calling back.
+		RID cache_buffer; // Valid when the result refreshes buffer_readbacks instead of calling back.
+		bool owns_staging = true; // False while buffer_readbacks owns the staging buffer.
 		uint32_t size = 0; // Buffer downloads: bytes to deliver.
 		bool is_texture = false;
 		TextureGetDataRequest texture_request;
@@ -465,10 +466,18 @@ public:
 
 	List<PendingDownload> pending_downloads;
 
-	// 2dog: Latest completed whole-buffer readback per buffer, returned by buffer_get_data() on async drivers.
-	HashMap<RID, Vector<uint8_t>> buffer_readback_cache;
+	// 2dog: buffer_get_data() on async drivers: the latest completed whole-buffer readback of a buffer and the
+	// staging buffer its next one reuses. The staging buffer is released after a while without reads.
+	struct BufferReadback {
+		Vector<uint8_t> data;
+		RDD::BufferID staging;
+		bool pending = false;
+		uint64_t last_read_frame = 0;
+	};
+	HashMap<RID, BufferReadback> buffer_readbacks;
+	static const uint64_t BUFFER_READBACK_IDLE_FRAMES = 120;
 
-	Error _buffer_queue_pending_download(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size, const Callable &p_callback, bool p_cache_result = false);
+	Error _buffer_queue_pending_download(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size, const Callable &p_callback, RDD::BufferID p_cache_staging = RDD::BufferID());
 	Vector<uint8_t> _buffer_get_data_cached(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size);
 	void _texture_download_copy_region(const TextureGetDataRequest &p_request, const RDD::BufferTextureCopyRegion &p_region, const uint8_t *p_buffer_data, uint32_t p_mipmap_offset, uint8_t *p_dst_data);
 	void _pending_downloads_initiate_maps();
