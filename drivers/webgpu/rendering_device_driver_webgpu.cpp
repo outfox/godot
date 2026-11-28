@@ -5318,9 +5318,12 @@ void RenderingDeviceDriverWebGPU::command_copy_buffer(CommandBufferID p_cmd_buff
 	for (uint32_t i = 0; i < p_regions.size(); i++) {
 		const BufferCopyRegion &region = p_regions[i];
 		// 2dog: WebGPU copies need 4-byte offsets; an invalid one would drop the whole command buffer.
-		// A size that is not a multiple of 4 is rounded up and also writes the bytes after the range.
 		ERR_CONTINUE_MSG((region.src_offset | region.dst_offset) & 3ULL,
 				vformat("WebGPU: buffer copy offsets must be multiples of 4 (src %d, dst %d); region skipped.", (int64_t)region.src_offset, (int64_t)region.dst_offset));
+		// 2dog: sizes are rounded up to 4 bytes. That is harmless in staging memory and in the padding at a buffer's
+		// end; anywhere else it would overwrite the bytes after the range, which no CPU copy could restore.
+		ERR_CONTINUE_MSG((region.size & 3ULL) && !dst->is_readback && !dst->shadow_map && region.dst_offset + region.size < dst->size,
+				vformat("WebGPU: buffer copy of %d bytes at offset %d is not a multiple of 4 bytes; region skipped.", (int64_t)region.size, (int64_t)region.dst_offset));
 		uint64_t size = (region.size + 3) & ~3ULL;
 		wgpuCommandEncoderCopyBufferToBuffer(cmd->encoder, src->handle, region.src_offset, dst->handle, region.dst_offset, size);
 	}
