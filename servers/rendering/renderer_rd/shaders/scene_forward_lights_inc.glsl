@@ -76,7 +76,7 @@ half V_GGX(half NdotL, half NdotV, half alpha) {
 }
 
 half D_GGX_anisotropic(half cos_theta_m, half alpha_x, half alpha_y, half cos_phi, half sin_phi) {
-	// The reciprocal can exceed the half-float range even when the final distribution is representable.
+	// 2dog: The reciprocal can exceed the half-float range even when the final distribution is representable.
 	float alpha2 = float(alpha_x) * float(alpha_y);
 	vec3 v = vec3(alpha_y, alpha_x, alpha2) * vec3(cos_phi, sin_phi, cos_theta_m);
 	float w2 = alpha2 / dot(v, v);

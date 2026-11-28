@@ -425,7 +425,7 @@ void RenderingDeviceGraph::_add_command_to_graph(ResourceTracker **p_resource_tr
 			// This resource depends on a parent resource.
 			resource_tracker->parent->reset_if_outdated(tracking_frame);
 
-			// Quit early if the parent is already in this command.
+			// 2dog: Quit early if the parent is already in this command.
 			if (resource_tracker->parent->command_index == p_command_index) {
 				DEV_ASSERT(resource_tracker->parent->usage_index != UINT32_MAX);
 
