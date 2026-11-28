@@ -1835,10 +1835,15 @@ Vector<uint8_t> RenderingDeviceDriverWebGPU::texture_get_data(TextureID p_textur
 	if (gpu_bpp == 0) {
 		gpu_bpp = rd_bpp;
 	}
-	uint32_t mip_w = tex->width;
-	uint32_t mip_h = tex->height;
-	uint32_t row_pitch = ((mip_w * gpu_bpp + 255) / 256) * 256; // 256-byte aligned
-	uint64_t buffer_size = (uint64_t)row_pitch * mip_h;
+	// 2dog: every mip level is read back, 3D textures with all depth slices, in the tight layout of
+	// get_image_format_required_size(). The staging buffer holds the mips back to back at 256-byte pitch.
+	const uint32_t mip_count = MAX(1u, tex->mipmaps);
+	const bool is_3d = tex->dimension == WGPUTextureDimension_3D;
+	uint64_t buffer_size = 0;
+	for (uint32_t i = 0; i < mip_count; i++) {
+		const uint32_t w = MAX(1u, tex->width >> i);
+		buffer_size += (uint64_t)(((w * gpu_bpp + 255) / 256) * 256) * MAX(1u, tex->height >> i) * (is_3d ? MAX(1u, tex->depth >> i) : 1u);
+	}
 
 	// If a readback is in flight, deliver pending callbacks and then probe the
 	// buffer's map state directly. emdawnwebgpu may have completed the map at
@@ -1866,22 +1871,35 @@ Vector<uint8_t> RenderingDeviceDriverWebGPU::texture_get_data(TextureID p_textur
 
 	// Return cached data if previous readback completed.
 	if (entry && entry->has_data && entry->map_complete) {
+		uint64_t result_size = 0;
+		for (uint32_t i = 0; i < mip_count; i++) {
+			result_size += (uint64_t)MAX(1u, tex->width >> i) * MAX(1u, tex->height >> i) * (is_3d ? MAX(1u, tex->depth >> i) : 1u) * rd_bpp;
+		}
 		Vector<uint8_t> result;
-		result.resize(mip_w * mip_h * rd_bpp);
+		result.resize(result_size);
 		uint8_t *dst = result.ptrw();
+		const uint8_t *src = entry->shadow;
 
-		if (texture_get_gpu_pixel_size(p_texture) != 0) {
-			// Format was promoted or downgraded — convert GPU data back to
-			// the original Godot format (e.g. R32Float→R8, Float16→Float32).
-			uint32_t dst_pitch = mip_w * rd_bpp;
-			texture_readback_convert(p_texture, entry->shadow, row_pitch,
-					dst, dst_pitch, mip_w, mip_h);
-		} else {
-			// No format divergence — un-pad from staging to tightly packed output.
-			uint32_t tight_row = mip_w * rd_bpp;
-			for (uint32_t y = 0; y < mip_h; y++) {
-				memcpy(dst + y * tight_row, entry->shadow + y * row_pitch, tight_row);
+		for (uint32_t i = 0; i < mip_count; i++) {
+			const uint32_t mip_w = MAX(1u, tex->width >> i);
+			const uint32_t mip_h = MAX(1u, tex->height >> i);
+			const uint32_t mip_d = is_3d ? MAX(1u, tex->depth >> i) : 1u;
+			const uint32_t row_pitch = ((mip_w * gpu_bpp + 255) / 256) * 256; // 256-byte aligned
+			const uint32_t tight_row = mip_w * rd_bpp;
+			const uint32_t rows = mip_h * mip_d;
+
+			if (texture_get_gpu_pixel_size(p_texture) != 0) {
+				// Format was promoted or downgraded — convert GPU data back to
+				// the original Godot format (e.g. R32Float→R8, Float16→Float32).
+				texture_readback_convert(p_texture, src, row_pitch, dst, tight_row, mip_w, rows);
+			} else {
+				// No format divergence — un-pad from staging to tightly packed output.
+				for (uint32_t y = 0; y < rows; y++) {
+					memcpy(dst + y * tight_row, src + y * row_pitch, tight_row);
+				}
 			}
+			src += (uint64_t)row_pitch * rows;
+			dst += (uint64_t)tight_row * rows;
 		}
 
 		// Mark consumed; do NOT auto-requeue. Each top-level call (e.g.
@@ -1939,17 +1957,26 @@ Vector<uint8_t> RenderingDeviceDriverWebGPU::texture_get_data(TextureID p_textur
 	// Copy texture to staging buffer.
 	WGPUCommandEncoderDescriptor enc_desc = {};
 	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, &enc_desc);
-	WGPUTexelCopyTextureInfo src_info = {};
-	src_info.texture = tex->gpu_handle();
-	src_info.mipLevel = 0;
-	src_info.origin = { 0, 0, p_layer };
-	WGPUTexelCopyBufferInfo dst_info = {};
-	dst_info.buffer = entry->staging;
-	dst_info.layout.offset = 0;
-	dst_info.layout.bytesPerRow = row_pitch;
-	dst_info.layout.rowsPerImage = mip_h;
-	WGPUExtent3D extent = { mip_w, mip_h, 1 };
-	wgpuCommandEncoderCopyTextureToBuffer(encoder, &src_info, &dst_info, &extent);
+	uint64_t staging_offset = 0;
+	for (uint32_t i = 0; i < mip_count; i++) {
+		const uint32_t mip_w = MAX(1u, tex->width >> i);
+		const uint32_t mip_h = MAX(1u, tex->height >> i);
+		const uint32_t mip_d = is_3d ? MAX(1u, tex->depth >> i) : 1u;
+		const uint32_t row_pitch = ((mip_w * gpu_bpp + 255) / 256) * 256;
+
+		WGPUTexelCopyTextureInfo src_info = {};
+		src_info.texture = tex->gpu_handle();
+		src_info.mipLevel = i;
+		src_info.origin = { 0, 0, p_layer };
+		WGPUTexelCopyBufferInfo dst_info = {};
+		dst_info.buffer = entry->staging;
+		dst_info.layout.offset = staging_offset;
+		dst_info.layout.bytesPerRow = row_pitch;
+		dst_info.layout.rowsPerImage = mip_h;
+		WGPUExtent3D extent = { mip_w, mip_h, mip_d };
+		wgpuCommandEncoderCopyTextureToBuffer(encoder, &src_info, &dst_info, &extent);
+		staging_offset += (uint64_t)row_pitch * mip_h * mip_d;
+	}
 	WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
 	wgpuQueueSubmit(queue, 1, &cmd);
 	wgpuCommandBufferRelease(cmd);
@@ -5290,6 +5317,10 @@ void RenderingDeviceDriverWebGPU::command_copy_buffer(CommandBufferID p_cmd_buff
 
 	for (uint32_t i = 0; i < p_regions.size(); i++) {
 		const BufferCopyRegion &region = p_regions[i];
+		// 2dog: WebGPU copies need 4-byte offsets; an invalid one would drop the whole command buffer.
+		// A size that is not a multiple of 4 is rounded up and also writes the bytes after the range.
+		ERR_CONTINUE_MSG((region.src_offset | region.dst_offset) & 3ULL,
+				vformat("WebGPU: buffer copy offsets must be multiples of 4 (src %d, dst %d); region skipped.", (int64_t)region.src_offset, (int64_t)region.dst_offset));
 		uint64_t size = (region.size + 3) & ~3ULL;
 		wgpuCommandEncoderCopyBufferToBuffer(cmd->encoder, src->handle, region.src_offset, dst->handle, region.dst_offset, size);
 	}
