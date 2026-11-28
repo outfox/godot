@@ -28,8 +28,11 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#import "display_server_macos.h"
+#ifdef WEBGPU_ENABLED
+#include "drivers/webgpu/rendering_context_driver_webgpu.h"
+#endif
 
+#import "display_server_macos.h"
 #import "godot_application.h"
 #import "godot_application_delegate.h"
 #import "godot_button_view.h"
@@ -104,6 +107,7 @@
 #import <IOKit/IOKitLib.h>
 #import <IOKit/hid/IOHIDKeys.h>
 #import <IOKit/hid/IOHIDLib.h>
+#import <IOKit/hidsystem/IOLLEvent.h>
 
 DisplayServerEnums::WindowID DisplayServerMacOS::_create_window(DisplayServerEnums::WindowMode p_mode, DisplayServerEnums::VSyncMode p_vsync_mode, const Rect2i &p_rect) {
 	const float scale = screen_get_max_scale();
@@ -192,7 +196,16 @@ DisplayServerEnums::WindowID DisplayServerMacOS::_create_window(DisplayServerEnu
 #ifdef METAL_ENABLED
 				RenderingContextDriverMetal::WindowPlatformData metal;
 #endif
+#ifdef WEBGPU_ENABLED
+				RenderingContextDriverWebGPU::WindowPlatformData webgpu;
+#endif
 			} wpd;
+#ifdef WEBGPU_ENABLED
+			if (rendering_driver == "webgpu") {
+				wpd.webgpu.kind = RenderingContextDriverWebGPU::WindowPlatformData::KIND_METAL_LAYER;
+				wpd.webgpu.window = (__bridge void *)layer;
+			}
+#endif
 #ifdef VULKAN_ENABLED
 			if (rendering_driver == "vulkan") {
 				wpd.vulkan.layer_ptr = (CAMetalLayer *const *)&layer;
@@ -695,9 +708,25 @@ void DisplayServerMacOS::send_window_event_by_id(DisplayServerEnums::WindowEvent
 
 void DisplayServerMacOS::release_pressed_events() {
 	_THREAD_SAFE_METHOD_
+	pressed_shift_sides = 0;
 	if (Input::get_singleton()) {
 		Input::get_singleton()->release_pressed_events();
 	}
+}
+
+bool DisplayServerMacOS::update_shift_pressed(bool p_left, unsigned int p_flags) {
+	_THREAD_SAFE_METHOD_
+	const unsigned int side = p_left ? NX_DEVICELSHIFTKEYMASK : NX_DEVICERSHIFTKEYMASK;
+	const unsigned int sides = p_flags & (NX_DEVICELSHIFTKEYMASK | NX_DEVICERSHIFTKEYMASK);
+	if (!(p_flags & NSEventModifierFlagShift)) {
+		pressed_shift_sides = 0;
+	} else if (sides) {
+		pressed_shift_sides = sides;
+	} else {
+		// Aggregate-only flagsChanged events still identify the key that changed.
+		pressed_shift_sides ^= side;
+	}
+	return (pressed_shift_sides & side) != 0;
 }
 
 void DisplayServerMacOS::sync_mouse_state() {
@@ -775,6 +804,13 @@ bool DisplayServerMacOS::get_is_resizing() const {
 
 void DisplayServerMacOS::window_destroy(DisplayServerEnums::WindowID p_window) {
 	ERR_FAIL_COND(!windows.has(p_window));
+	WindowData &wd = windows[p_window];
+	// AppKit may retain queued notifications after closing the NSWindow.
+	// Detach callbacks before their display server or rendering resources end.
+	[wd.window_delegate invalidate];
+	[wd.window_object setDelegate:nil];
+	[wd.window_view setWindowID:DisplayServerEnums::INVALID_WINDOW_ID];
+	wd.window_view.layer.delegate = nil;
 
 #if defined(GLES3_ENABLED)
 	if (gl_manager_legacy) {
@@ -1241,7 +1277,9 @@ void DisplayServerMacOS::set_confinement_window(DisplayServerEnums::WindowID p_w
 		if ([wd.window_object respondsToSelector:@selector(setMouseConfinementRect:)]) {
 			confinement_window = p_window;
 			CGAssociateMouseAndMouseCursorPosition(true);
-			[wd.window_object setStyleMask:[wd.window_object styleMask] & ~NSWindowStyleMaskResizable];
+			if (!wd.fullscreen && !wd.fs_transition) {
+				[wd.window_object setStyleMask:[wd.window_object styleMask] & ~NSWindowStyleMaskResizable];
+			}
 			[wd.window_object setMouseConfinementRect:[wd.window_view frame]];
 		} else {
 			CGAssociateMouseAndMouseCursorPosition(false);
@@ -2394,7 +2432,7 @@ void DisplayServerMacOS::window_set_mode(DisplayServerEnums::WindowMode p_mode, 
 		} break;
 		case DisplayServerEnums::WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
 		case DisplayServerEnums::WINDOW_MODE_FULLSCREEN: {
-			if (wd.resize_disabled) { // Fullscreen window should be resizable to work.
+			if (wd.resize_disabled || confinement_window == p_window) { // Fullscreen window should be resizable to work.
 				[wd.window_object setStyleMask:[wd.window_object styleMask] | NSWindowStyleMaskResizable];
 			}
 			[wd.window_object setContentMinSize:NSMakeSize(0, 0)];
@@ -3621,7 +3659,6 @@ DisplayServer *DisplayServerMacOS::create_func(const String &p_rendering_driver,
 
 Vector<String> DisplayServerMacOS::get_rendering_drivers_func() {
 	Vector<String> drivers;
-
 #if defined(VULKAN_ENABLED)
 	drivers.push_back("vulkan");
 #endif
@@ -3633,6 +3670,9 @@ Vector<String> DisplayServerMacOS::get_rendering_drivers_func() {
 #if defined(ANGLE_ENABLED)
 	drivers.push_back("opengl3_angle");
 #endif
+#endif
+#ifdef WEBGPU_ENABLED
+	drivers.push_back("webgpu");
 #endif
 	drivers.push_back("dummy");
 
@@ -3914,6 +3954,13 @@ DisplayServerMacOS::DisplayServerMacOS(const String &p_rendering_driver, Display
 		OS::get_singleton()->set_current_rendering_driver_name(rendering_driver, OS::RENDERING_SOURCE_FALLBACK);
 	}
 #endif
+#endif
+#ifdef WEBGPU_ENABLED
+	if (rendering_driver == "webgpu") {
+		rendering_context = memnew(RenderingContextDriverWebGPU);
+	}
+#endif
+#if defined(VULKAN_ENABLED)
 	if (rendering_driver == "vulkan") {
 		rendering_context = memnew(RenderingContextDriverVulkanMacOS);
 	}
@@ -4068,8 +4115,14 @@ DisplayServerMacOS::~DisplayServerMacOS() {
 	for (HashMap<DisplayServerEnums::WindowID, WindowData>::Iterator E = windows.begin(); E;) {
 		HashMap<DisplayServerEnums::WindowID, WindowData>::Iterator F = E;
 		++E;
-		[F->value.window_object setContentView:nil];
-		[F->value.window_object close];
+		GodotWindowDelegate *window_delegate = F->value.window_delegate;
+		NSWindow *window_object = F->value.window_object;
+		[F->value.window_view setWindowID:DisplayServerEnums::INVALID_WINDOW_ID];
+		F->value.window_view.layer.delegate = nil;
+		[window_object setContentView:nil];
+		[window_object close];
+		[window_delegate invalidate];
+		[window_object setDelegate:nil];
 	}
 
 	// Destroy drivers.

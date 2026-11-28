@@ -51,6 +51,8 @@ class Main {
 	static void print_help_option(const char *p_option, const char *p_description, CLIOptionAvailability p_availability = CLI_OPTION_AVAILABILITY_TEMPLATE_RELEASE);
 	static String format_help_option(const char *p_option);
 	static void print_help(const char *p_binary);
+	static void cleanup_setup_phase();
+	static void cleanup_servers_phase();
 	static uint64_t last_ticks;
 	static uint32_t hide_print_fps_attempts;
 	static uint32_t frames;
@@ -77,8 +79,17 @@ public:
 	static void test_cleanup();
 	static int start();
 
-	static bool iteration();
+	static bool iteration(double p_delta_seconds = -1.0);
 	static void force_redraw();
+
+	struct FrameTimings {
+		uint64_t phys_script_usec = 0;
+		uint64_t phys_jolt_usec = 0;
+		uint64_t process_usec = 0;
+		uint64_t render_usec = 0;
+		uint64_t tail_usec = 0;
+	};
+	static FrameTimings last_frame_timings;
 
 	static bool is_iterating();
 

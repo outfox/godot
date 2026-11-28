@@ -60,6 +60,15 @@ extern int godot_js_os_has_feature(const char *p_ftr);
 extern int godot_js_pwa_cb(void (*p_callback)());
 extern int godot_js_pwa_update();
 
+#ifdef WEB_SIDE_MODULE_LOADER_ENABLED
+// 2dog: GDExtension side modules (library_godot_dylink.js).
+extern int godot_js_dylink_open(const char *p_name, const uint8_t *p_bytes, int p_size);
+extern void *godot_js_dylink_symbol(int p_handle, const char *p_symbol);
+extern void godot_js_dylink_close(int p_handle);
+extern char *godot_js_dylink_error();
+extern char *godot_js_dylink_thread_load(int p_index, const char *p_name, const uint8_t *p_bytes, int p_size, const char *p_layout);
+#endif
+
 // Input
 extern void godot_js_input_mouse_button_cb(int (*p_callback)(int p_pressed, int p_button, double p_x, double p_y, int p_modifiers));
 extern void godot_js_input_mouse_move_cb(void (*p_callback)(double p_x, double p_y, double p_rel_x, double p_rel_y, int p_modifiers, double p_pressure));
@@ -70,7 +79,7 @@ extern void godot_js_input_vibrate_handheld(int p_duration_ms);
 
 extern void godot_js_set_ime_active(int p_active);
 extern void godot_js_set_ime_position(int p_x, int p_y);
-extern void godot_js_set_ime_cb(void (*p_input)(int p_type, const char *p_text), void (*p_callback)(int p_type, int p_repeat, int p_modifiers), char r_code[32], char r_key[32]);
+extern void godot_js_set_ime_cb(void (*p_input)(int p_type, const char *p_text));
 extern int godot_js_is_ime_focused();
 
 // Input gamepad
@@ -106,6 +115,7 @@ extern int godot_js_display_canvas_is_focused();
 extern void godot_js_display_desired_size_set(int p_width, int p_height);
 extern int godot_js_display_size_update();
 extern void godot_js_display_window_size_get(int32_t *p_x, int32_t *p_y);
+extern int godot_js_display_canvas_size_get(const char *p_selector, int32_t *p_width, int32_t *p_height);
 extern void godot_js_display_screen_size_get(int32_t *p_x, int32_t *p_y);
 extern int godot_js_display_fullscreen_request();
 extern int godot_js_display_fullscreen_exit();

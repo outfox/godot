@@ -607,6 +607,7 @@ public:
 
 			static const Vector3i DIRTY_ALL;
 			Vector3i dirty_regions; //(0,0,0 is not dirty, negative is refresh from the end, DIRTY_ALL is refresh all.
+			bool redraw = false; // A region was rendered with draws skipped (web), so the cascade is rendered again.
 
 			RID sdf_store_uniform_set;
 			RID sdf_direct_light_static_uniform_set;
@@ -827,11 +828,18 @@ public:
 	RID shader_version;
 	PipelineDeferredRD pipelines[SHADER_SPECIALIZATION_VARIATIONS][MODE_MAX];
 
+	bool sdfgi_supported = true;
+	bool voxel_gi_supported = true;
+
 	GI();
 	~GI();
 
 	void init(RendererRD::SkyRD *p_sky);
 	void free();
+
+	// SDFGI and VoxelGI updates need read-write storage textures in RGBA8, RGBA16 and RGBA32 formats.
+	bool is_sdfgi_supported() const { return sdfgi_supported; }
+	bool is_voxel_gi_supported() const { return voxel_gi_supported; }
 
 	Ref<SDFGI> create_sdfgi(RID p_env, const Vector3 &p_world_position, uint32_t p_requested_history_size);
 

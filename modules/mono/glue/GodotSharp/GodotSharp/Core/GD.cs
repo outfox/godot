@@ -347,8 +347,9 @@ namespace Godot
             if (stackFrame != null)
             {
                 string fileName = stackFrame.GetFileName();
-				if (fileName is not null)
-					callerFilePath = ProjectSettings.LocalizePath(fileName);
+                // 2dog: AOT or trimmed builds report an empty file name.
+                if (!string.IsNullOrEmpty(fileName))
+                    callerFilePath = ProjectSettings.LocalizePath(fileName);
                 DebuggingUtils.GetStackFrameMethodDecl(stackFrame, out callerName);
                 callerLineNumber = stackFrame.GetFileLineNumber();
             }

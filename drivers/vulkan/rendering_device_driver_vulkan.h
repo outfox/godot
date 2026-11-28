@@ -268,7 +268,7 @@ public:
 	virtual void buffer_unmap(BufferID p_buffer) override final;
 	virtual uint8_t *buffer_persistent_map_advance(BufferID p_buffer, uint64_t p_frames_drawn) override final;
 	virtual uint64_t buffer_get_dynamic_offsets(Span<BufferID> p_buffers) override final;
-	virtual void buffer_flush(BufferID p_buffer) override final;
+	virtual void buffer_flush(BufferID p_buffer, uint64_t p_offset = 0, uint64_t p_size = 0) override final;
 	virtual uint64_t buffer_get_device_address(BufferID p_buffer) override final;
 
 	/*****************/
@@ -285,6 +285,9 @@ public:
 			VmaAllocation handle = nullptr;
 			VmaAllocationInfo info = {};
 		} allocation; // All 0/null if just a view.
+		// 2dog: dedicated non-VMA allocation backing an external (shareable) texture.
+		VkDeviceMemory external_memory = VK_NULL_HANDLE;
+		uint64_t external_memory_size = 0;
 		bool is_subsampled = false;
 #ifdef DEBUG_ENABLED
 		bool created_from_extension = false;
@@ -297,6 +300,11 @@ public:
 public:
 	virtual TextureID texture_create(const TextureFormat &p_format, const TextureView &p_view) override final;
 	virtual TextureSamples texture_get_nearest_supported_samples(const TextureFormat &p_format) override final;
+
+	// 2dog: external texture sharing.
+	VkExternalMemoryFeatureFlags _external_texture_features(VkExternalMemoryHandleTypeFlagBits p_handle_type, VkFormat p_format, VkImageUsageFlags p_usage) const;
+	virtual uint32_t external_texture_supported_handle_types() override final;
+	virtual TextureID external_texture_create(ExternalTextureShareHandleType p_handle_type, DataFormat p_format, uint32_t p_width, uint32_t p_height, uint64_t p_import_handle, uint64_t *r_export_handle) override final;
 	virtual TextureID texture_create_from_extension(uint64_t p_native_texture, TextureType p_type, DataFormat p_format, uint32_t p_array_layers, bool p_depth_stencil, uint32_t p_mipmaps) override final;
 	virtual TextureID texture_create_shared(TextureID p_original_texture, const TextureView &p_view) override final;
 	virtual TextureID texture_create_shared_from_slice(TextureID p_original_texture, const TextureView &p_view, TextureSliceType p_slice_type, uint32_t p_layer, uint32_t p_layers, uint32_t p_mipmap, uint32_t p_mipmaps) override final;

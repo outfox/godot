@@ -54,8 +54,13 @@
 	window_id = wid;
 }
 
+- (void)invalidate {
+	ds = nullptr;
+	window_id = DisplayServerEnums::INVALID_WINDOW_ID;
+}
+
 - (BOOL)windowShouldClose:(id)sender {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return YES;
 	}
 
@@ -64,7 +69,7 @@
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -84,7 +89,7 @@
 }
 
 - (void)windowWillEnterFullScreen:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -101,16 +106,11 @@
 }
 
 - (void)windowDidFailToEnterFullScreen:(NSWindow *)window {
-	if (!ds->has_window(window_id)) {
-		return;
-	}
-
-	DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
-	wd.fs_transition = false;
+	[self restoreWindowedState];
 }
 
 - (void)windowDidEnterFullScreen:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -134,7 +134,7 @@
 }
 
 - (void)windowWillExitFullScreen:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -150,7 +150,7 @@
 }
 
 - (void)windowDidFailToExitFullScreen:(NSWindow *)window {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -165,18 +165,20 @@
 }
 
 - (void)windowDidExitFullScreen:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	[self restoreWindowedState];
+	[self windowDidResize:notification];
+}
+
+- (void)restoreWindowedState {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
 	DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
-	if (wd.exclusive_fullscreen) {
-		ds->update_presentation_mode();
-	}
-
 	wd.fullscreen = false;
 	wd.exclusive_fullscreen = false;
 	wd.fs_transition = false;
+	ds->update_presentation_mode();
 
 	// Set window size limits.
 	const float scale = ds->screen_get_max_scale();
@@ -205,13 +207,10 @@
 	if (ds->is_always_on_top_recursive(window_id)) {
 		[wd.window_object setLevel:NSFloatingWindowLevel];
 	}
-
-	// Force window resize event and redraw.
-	[self windowDidResize:notification];
 }
 
 - (BOOL)windowShouldZoom:(NSWindow *)window toFrame:(NSRect)newFrame {
-	if (ds->has_window(window_id)) {
+	if (ds && ds->has_window(window_id)) {
 		DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
 		if (!wd.borderless && !(NSEqualRects([wd.window_object frame], [[wd.window_object screen] visibleFrame]))) {
 			wd.pre_zoom_rect = [wd.window_object frame];
@@ -221,7 +220,7 @@
 }
 
 - (void)windowDidChangeBackingProperties:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -251,7 +250,7 @@
 }
 
 - (void)windowWillStartLiveResize:(NSNotification *)notification {
-	if (ds->has_window(window_id)) {
+	if (ds && ds->has_window(window_id)) {
 		DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
 		wd.last_frame_rect = [wd.window_object frame];
 		ds->set_is_resizing(true);
@@ -259,11 +258,13 @@
 }
 
 - (void)windowDidEndLiveResize:(NSNotification *)notification {
-	ds->set_is_resizing(false);
+	if (ds) {
+		ds->set_is_resizing(false);
+	}
 }
 
 - (void)windowDidResize:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -286,7 +287,7 @@
 }
 
 - (void)windowDidChangeScreen:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -294,7 +295,7 @@
 }
 
 - (void)windowDidMove:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -307,7 +308,7 @@
 }
 
 - (void)windowDidBecomeKey:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -341,7 +342,7 @@
 }
 
 - (void)windowDidResignKey:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -365,7 +366,7 @@
 }
 
 - (void)windowDidMiniaturize:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -379,7 +380,7 @@
 }
 
 - (void)windowDidDeminiaturize:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 
@@ -395,7 +396,7 @@
 }
 
 - (void)windowDidChangeOcclusionState:(NSNotification *)notification {
-	if (!ds->has_window(window_id)) {
+	if (!ds || !ds->has_window(window_id)) {
 		return;
 	}
 	DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);

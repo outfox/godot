@@ -57,6 +57,10 @@ void BaseButton::_unpress_group() {
 	}
 }
 
+bool BaseButton::_has_visible_point(const Point2 &p_point) const {
+	return has_point(p_point) && get_viewport_rect().has_point(get_global_transform_with_canvas().xform(p_point));
+}
+
 void BaseButton::gui_input(const Ref<InputEvent> &p_event) {
 	ERR_FAIL_COND(p_event.is_null());
 
@@ -72,16 +76,15 @@ void BaseButton::gui_input(const Ref<InputEvent> &p_event) {
 
 	if (touch.is_valid()) {
 		if (status.touch_index == -1) {
-			if (touch->is_pressed()) {
-				Point2 vp_touch_pos = (get_canvas_transform() * get_global_transform()).xform(touch->get_position());
+			if (touch->is_pressed() && _has_visible_point(touch->get_position())) {
 				status.touch_index = touch->get_index();
-				status.press_attempt = true;
-				status.pressing_inside = has_point(touch->get_position()) && get_viewport_rect().has_point(vp_touch_pos);
+				status.pressing_inside = true;
 				on_action_event(p_event);
 			}
 		} else if (touch->get_index() == status.touch_index) {
 			if (!touch->is_pressed()) {
 				status.touch_index = -1;
+				status.pressing_inside = _has_visible_point(touch->get_position());
 				on_action_event(p_event);
 			}
 		}
@@ -89,9 +92,8 @@ void BaseButton::gui_input(const Ref<InputEvent> &p_event) {
 
 	Ref<InputEventScreenDrag> drag = p_event;
 	if (drag.is_valid() && drag->get_index() == status.touch_index && status.press_attempt) {
-		Point2 vp_touch_pos = (get_canvas_transform() * get_global_transform()).xform(drag->get_position());
 		bool last_press_inside = status.pressing_inside;
-		status.pressing_inside = has_point(drag->get_position()) && get_viewport_rect().has_point(vp_touch_pos);
+		status.pressing_inside = _has_visible_point(drag->get_position());
 		if (last_press_inside != status.pressing_inside) {
 			queue_redraw();
 		}
@@ -102,6 +104,9 @@ void BaseButton::gui_input(const Ref<InputEvent> &p_event) {
 
 	bool button_masked = mouse_button.is_valid() && button_mask.has_flag(mouse_button_to_mask(mouse_button->get_button_index()));
 	if (button_masked || ui_accept) {
+		if (mouse_button.is_valid()) {
+			status.pressing_inside = _has_visible_point(mouse_button->get_position());
+		}
 		was_mouse_pressed = button_masked;
 		on_action_event(p_event);
 		was_mouse_pressed = false;
@@ -110,7 +115,7 @@ void BaseButton::gui_input(const Ref<InputEvent> &p_event) {
 		if (mouse_motion.is_valid()) {
 			if (status.press_attempt) {
 				bool last_press_inside = status.pressing_inside;
-				status.pressing_inside = has_point(mouse_motion->get_position());
+				status.pressing_inside = _has_visible_point(mouse_motion->get_position());
 				if (last_press_inside != status.pressing_inside) {
 					queue_redraw();
 				}
@@ -242,8 +247,8 @@ void BaseButton::on_action_event(Ref<InputEvent> p_event) {
 	Ref<InputEventScreenDrag> screen_drag = p_event;
 
 	bool is_accept_event = mouse_button.is_null() && screen_touch.is_null() && screen_drag.is_null();
-	bool is_touch_press_inside = screen_touch.is_valid() && screen_touch->is_pressed() && status.pressing_inside;
-	if (p_event->is_pressed() && (is_accept_event || status.hovering || is_touch_press_inside)) {
+	bool is_pointer_press_inside = status.pressing_inside && (screen_touch.is_valid() || (mouse_button.is_valid() && status.hovering));
+	if (p_event->is_pressed() && (is_accept_event || is_pointer_press_inside)) {
 		status.press_attempt = true;
 		status.pressing_inside = true;
 		if (!status.pressed_down_with_focus) {
@@ -687,7 +692,10 @@ void BaseButton::_bind_methods() {
 	BIND_THEME_ITEM(Theme::DATA_TYPE_SOUND, BaseButton, hover_sound);
 	BIND_THEME_ITEM(Theme::DATA_TYPE_SOUND, BaseButton, pressed_sound);
 	BIND_THEME_ITEM(Theme::DATA_TYPE_SOUND, BaseButton, pressed_disabled_sound);
+}
 
+// 2dog: register settings per engine instance because _bind_methods() runs only once.
+void BaseButton::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "gui/timers/button_shortcut_feedback_highlight_time", PROPERTY_HINT_RANGE, "0.01,10,0.01,suffix:s"), 0.2);
 }
 

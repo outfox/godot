@@ -592,6 +592,13 @@ bool WorkerThreadPool::_handle_runlevel(ThreadData *p_thread_data, MutexLock<Bin
 				if (!task_queue.first() && !low_priority_task_queue.first()) {
 					p_thread_data->pre_exited_languages = true;
 					runlevel_data.pre_exit_languages.num_idle_threads++;
+					// 2dog: Wake workers that went to sleep while queued work still prevented them from reporting idle.
+					for (ThreadData &thread : threads) {
+						if (!thread.pre_exited_languages && !thread.signaled) {
+							thread.signaled = true;
+							thread.cond_var.notify_one();
+						}
+					}
 					control_cond_var.notify_all();
 				}
 			}
@@ -753,6 +760,22 @@ void WorkerThreadPool::wait_for_group_task_completion(GroupID p_group) {
 	}
 
 	MutexLock task_lock(task_mutex); // This mutex is needed when Physics 2D and/or 3D is selected to run on a separate thread.
+	groups.erase(p_group);
+#else
+	// On nothreads builds, tasks were already processed synchronously in _post_tasks.
+	// Still need to clean up the Group and remove from the HashMap.
+	Group **groupp = groups.getptr(p_group);
+	if (!groupp) {
+		ERR_FAIL_MSG("Invalid Group ID.");
+	}
+	Group *group = *groupp;
+
+	uint32_t max_users = group->tasks_used + 1;
+	uint32_t finished_users = group->finished.increment();
+	if (finished_users == max_users) {
+		group_allocator.free(group);
+	}
+
 	groups.erase(p_group);
 #endif
 }

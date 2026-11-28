@@ -40,6 +40,9 @@
 #include "servers/rendering/rendering_server_types.h"
 
 void RendererCompositorRD::blit_render_targets_to_screen(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen *p_render_targets, int p_amount) {
+	if (!RD::get_singleton()->screen_is_created(p_screen)) {
+		return; // 2dog: a headless rendering device has no screens.
+	}
 	Error err = RD::get_singleton()->screen_prepare_for_drawing(p_screen);
 	if (err != OK) {
 		// Window is minimized and does not have valid swapchain, skip drawing without printing errors.
@@ -144,7 +147,7 @@ void RendererCompositorRD::initialize() {
 		blit_modes.push_back("\n");
 		blit_modes.push_back("\n#define USE_LAYER\n");
 		blit_modes.push_back("\n#define USE_LAYER\n#define APPLY_LENS_DISTORTION\n");
-		blit_modes.push_back("\n");
+		blit_modes.push_back("\n#define USE_ALPHA_BLEND\n");
 
 		blit.shader.initialize(blit_modes);
 		blit.shader_version = blit.shader.version_create();
@@ -195,9 +198,16 @@ RendererCompositorRD::BlitPipelines RendererCompositorRD::_get_blit_pipelines_fo
 		return it->value;
 	}
 
+	RenderingDevice::PipelineColorBlendState alpha_blend = RenderingDevice::PipelineColorBlendState::create_blend();
+	if (RD::get_singleton()->get_device_api_name() == "WebGPU") {
+		// Blend color only and keep the opaque clear alpha: a browser may composite the canvas with its alpha.
+		alpha_blend.attachments.write[0].src_alpha_blend_factor = RD::BLEND_FACTOR_ZERO;
+		alpha_blend.attachments.write[0].dst_alpha_blend_factor = RD::BLEND_FACTOR_ONE;
+	}
+
 	BlitPipelines pipelines;
 	for (int i = 0; i < BLIT_MODE_MAX; i++) {
-		pipelines.pipelines[i] = RD::get_singleton()->render_pipeline_create(blit.shader.version_get_shader(blit.shader_version, i), format, RD::INVALID_ID, RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), i == BLIT_MODE_NORMAL_ALPHA ? RenderingDevice::PipelineColorBlendState::create_blend() : RenderingDevice::PipelineColorBlendState::create_disabled(), 0);
+		pipelines.pipelines[i] = RD::get_singleton()->render_pipeline_create(blit.shader.version_get_shader(blit.shader_version, i), format, RD::INVALID_ID, RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), i == BLIT_MODE_NORMAL_ALPHA ? alpha_blend : RenderingDevice::PipelineColorBlendState::create_disabled(), 0);
 	}
 	blit.pipelines_by_format.insert(format, pipelines);
 	return pipelines;
@@ -217,6 +227,9 @@ void RendererCompositorRD::set_boot_image_with_stretch(const Ref<Image> &p_image
 		return;
 	}
 
+	if (!RD::get_singleton()->screen_is_created(DisplayServerEnums::MAIN_WINDOW_ID)) {
+		return; // 2dog: a headless rendering device has no screens.
+	}
 	Error err = RD::get_singleton()->screen_prepare_for_drawing(DisplayServerEnums::MAIN_WINDOW_ID);
 	if (err != OK) {
 		// Window is minimized and does not have valid swapchain, skip drawing without printing errors.
@@ -372,12 +385,31 @@ RendererCompositorRD::RendererCompositorRD() {
 	texture_storage->_tex_blit_shader_initialize();
 
 	String rendering_method = OS::get_singleton()->get_current_rendering_method();
-	uint64_t textures_per_stage = RD::get_singleton()->limit_get(RD::LIMIT_MAX_TEXTURES_PER_SHADER_STAGE);
-
-	if (rendering_method == "mobile" || textures_per_stage < 48) {
-		if (rendering_method == "forward_plus") {
-			WARN_PRINT_ONCE("Platform supports less than 48 textures per stage which is less than required by the Clustered renderer. Attempting to fallback to the Mobile renderer.");
+	if (rendering_method == "forward_plus") {
+		String missing;
+		// The clustered scene shader's fragment stage samples 48 textures with 8 lightmaps and 8 VoxelGIs, 34 with the
+		// compact bindings of RenderForwardClustered, plus the material's textures. Its storage buffers and the WebGPU
+		// push constant buffer take 11 slots, 10 with the lightmaps in a uniform buffer.
+		const bool compact_bindings = RD::get_singleton()->get_driver_workarounds().compact_scene_bindings;
+		const uint64_t textures_needed = compact_bindings ? 40 : 48;
+		const uint64_t storage_buffers_needed = compact_bindings ? 10 : 13;
+		if (RD::get_singleton()->limit_get(RD::LIMIT_MAX_TEXTURES_PER_SHADER_STAGE) < textures_needed) {
+			missing = vformat("%d textures per stage", textures_needed);
+		} else if (RD::get_singleton()->limit_get(RD::LIMIT_MAX_STORAGE_BUFFERS_PER_SHADER_STAGE) < storage_buffers_needed) {
+			missing = vformat("%d storage buffers per stage", storage_buffers_needed);
 		}
+		if (!missing.is_empty()) {
+			WARN_PRINT(vformat("The Clustered renderer requires %s, which this platform lacks. Defaulting to Mobile renderer.", missing));
+			rendering_method = "mobile";
+			OS::get_singleton()->set_current_rendering_method(rendering_method, OS::get_singleton()->get_current_rendering_method_source());
+		} else if (RD::get_singleton()->get_driver_workarounds().limited_read_write_storage) {
+			// SDFGI, VoxelGI and compute depth of field need read-write storage in RGBA8, RGBA16 and RGBA32 formats (WebGPU
+			// texture-formats-tier2). The renderer runs without them and warns when a scene asks for one.
+			print_verbose("The Clustered renderer runs without SDFGI, VoxelGI and compute depth of field: this platform lacks read-write storage for RGBA8, RGBA16 and RGBA32 formats.");
+		}
+	}
+
+	if (rendering_method == "mobile") {
 #ifdef MOBILE_RD_ENABLED
 		scene = memnew(RendererSceneRenderImplementation::RenderForwardMobile());
 #endif // MOBILE_RD_ENABLED

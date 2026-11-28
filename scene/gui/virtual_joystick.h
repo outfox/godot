@@ -78,6 +78,8 @@ private:
 	Vector2 joystick_pos;
 	Vector2 tip_pos;
 
+	void _handle_button(const Vector2 &p_position, int p_index, bool p_pressed);
+	void _handle_motion(const Vector2 &p_position, int p_index);
 	void _update_joystick(const Vector2 &p_pos);
 	void _handle_input_actions();
 	void _reset();

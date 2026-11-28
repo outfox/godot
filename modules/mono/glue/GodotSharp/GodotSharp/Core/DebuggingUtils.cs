@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -89,7 +90,7 @@ namespace Godot
             {
                 ArgumentOutOfRangeException.ThrowIfNegative(size);
 
-                var err = NativeFuncs.godotsharp_stack_info_vector_resize(ref this, size);
+                var err = (Error)NativeFuncs.godotsharp_stack_info_vector_resize(ref this, size);
                 if (err != Error.Ok)
                     throw new InvalidOperationException("Failed to resize vector. Error code is: " + err.ToString());
             }
@@ -115,6 +116,8 @@ namespace Godot
         }
 
         [StackTraceHidden]
+        [UnconditionalSuppressMessage("Trimming", "IL2026",
+            Justification = "Diagnostics only: a frame whose method metadata was trimmed is skipped, nothing functional depends on it.")]
         internal static StackFrame? GetCurrentStackFrame()
         {
             var stackTrace = new StackTrace(fNeedFileInfo: true);
@@ -132,6 +135,8 @@ namespace Godot
         }
 
         [UnmanagedCallersOnly]
+        [UnconditionalSuppressMessage("Trimming", "IL2026",
+            Justification = "Diagnostics only: a frame whose method metadata was trimmed degrades to an incomplete stack trace entry, nothing functional depends on it.")]
         [StackTraceHidden]
         internal static unsafe void GetCurrentStackInfo(void* destVector)
         {
@@ -183,6 +188,8 @@ namespace Godot
             }
         }
 
+        [UnconditionalSuppressMessage("Trimming", "IL2026",
+            Justification = "Diagnostics only: a frame whose method metadata was trimmed degrades to an incomplete stack trace entry, nothing functional depends on it.")]
         internal static void GetStackFrameMethodDecl(StackFrame frame, out string methodDecl)
         {
             MethodBase? methodBase = frame.GetMethod();

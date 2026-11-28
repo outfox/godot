@@ -111,4 +111,5 @@ TTS_Windows::TTS_Windows() {
 
 TTS_Windows::~TTS_Windows() {
 	memdelete(driver);
+	singleton = nullptr;
 }

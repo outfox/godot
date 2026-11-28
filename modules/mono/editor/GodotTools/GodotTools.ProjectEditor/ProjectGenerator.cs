@@ -26,11 +26,11 @@ namespace GodotTools.ProjectEditor
             var mainGroup = root.AddPropertyGroup();
             mainGroup.AddProperty("TargetFramework", GodotMinimumRequiredTfm);
 
-            // Non-gradle builds require .NET 10 to match the jar libraries included in the export template.
-            var net10 = mainGroup.AddProperty("TargetFramework", "net10.0");
-            net10.Condition = " '$(GodotTargetPlatform)' == 'android' ";
-
             mainGroup.AddProperty("EnableDynamicLoading", "true");
+
+            // 2dog: web builds cannot dynamically load managed assemblies.
+            var dynLoad = mainGroup.AddProperty("EnableDynamicLoading", "false");
+            dynLoad.Condition = " '$(GodotTargetPlatform)' == 'web' ";
 
             string sanitizedName = IdentifierUtils.SanitizeQualifiedIdentifier(name, allowEmptyIdentifiers: true);
 

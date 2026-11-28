@@ -191,6 +191,14 @@ void OS_AppleEmbedded::initialize_joypads() {
 #endif
 }
 
+void OS_AppleEmbedded::process_joypads() {
+#ifdef SDL_ENABLED
+	if (joypad_sdl) {
+		joypad_sdl->process_events();
+	}
+#endif
+}
+
 void OS_AppleEmbedded::initialize_modules() {
 	apple_embedded = memnew(AppleEmbedded);
 	Engine::get_singleton()->add_singleton(Engine::Singleton("AppleEmbedded", apple_embedded));
@@ -238,13 +246,28 @@ bool OS_AppleEmbedded::iterate() {
 	}
 #endif
 
-	return Main::iteration();
+	bool quit = Main::iteration();
+	// 2dog: the view keeps drawing after a quit request; a libgodot host decides what quitting means.
+	if (quit && !libgodot_quit_notified && libgodot_quit_callback) {
+		libgodot_quit_notified = true;
+		libgodot_quit_callback(libgodot_callback_userdata);
+	}
+	return quit;
 }
 
 void OS_AppleEmbedded::start() {
 	if (Main::start() == EXIT_SUCCESS) {
 		main_loop->initialize();
+		if (libgodot_started_callback) {
+			libgodot_started_callback(libgodot_callback_userdata);
+		}
 	}
+}
+
+void OS_AppleEmbedded::set_libgodot_callbacks(void (*p_started)(void *), void (*p_quit_requested)(void *), void *p_userdata) {
+	libgodot_started_callback = p_started;
+	libgodot_quit_callback = p_quit_requested;
+	libgodot_callback_userdata = p_userdata;
 }
 
 void OS_AppleEmbedded::finalize() {

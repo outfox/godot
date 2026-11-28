@@ -88,6 +88,12 @@ Error RenderingDeviceDriverMetal::_create_device() {
 }
 
 void RenderingDeviceDriverMetal::_resolve_sync_mode() {
+	// 2dog: on Apple's virtual GPU (macOS VMs such as hosted CI runners) barrier-mode command buffers never complete:
+	// every fence wait times out and nothing renders. Use native hazard tracking there, as 4.7 did everywhere.
+	if (sync_mode == Barriers && String::utf8(device->name()->utf8String()).contains("Paravirtual")) {
+		sync_mode = HazardTracking;
+	}
+
 	if (sync_mode == Barriers) {
 		print_verbose("Metal 3: Barrier synchronization enabled.");
 		base_hazard_tracking = MTL::ResourceHazardTrackingModeUntracked;
@@ -96,6 +102,7 @@ void RenderingDeviceDriverMetal::_resolve_sync_mode() {
 		timestamp_queries_supported = device->supportsCounterSampling(MTL::CounterSamplingPointAtStageBoundary);
 		if (timestamp_queries_supported) {
 			timestamp_fence = NS::TransferPtr(device->newFence());
+			timestamp_queries_supported = timestamp_fence.get() != nullptr;
 		}
 	} else {
 		print_verbose("Metal 3: Native hazard tracking enabled.");
@@ -312,7 +319,7 @@ void RenderingDeviceDriverMetal::timestamp_query_pool_get_results(QueryPoolID p_
 }
 
 uint64_t RenderingDeviceDriverMetal::timestamp_query_result_to_time(uint64_t p_result) {
-	return p_result; // Already converted to nanoseconds in get_results.
+	return p_result; // Apple GPU timestamp counters report nanoseconds.
 }
 
 void RenderingDeviceDriverMetal::command_timestamp_write(CommandBufferID p_cmd_buffer, QueryPoolID p_pool_id, uint32_t p_index) {

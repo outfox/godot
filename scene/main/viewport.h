@@ -668,6 +668,7 @@ public:
 	void gui_release_focus();
 	Control *gui_get_focus_owner() const;
 	Control *gui_get_hovered_control() const;
+	bool gui_is_mouse_in_viewport() const { return gui.mouse_in_viewport && !gui.subwindow_over; }
 	Window *get_focused_subwindow() const { return gui.subwindow_focused; }
 
 	PackedStringArray get_configuration_warnings() const override;

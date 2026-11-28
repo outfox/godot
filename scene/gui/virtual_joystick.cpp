@@ -42,65 +42,58 @@ void VirtualJoystick::gui_input(const Ref<InputEvent> &p_event) {
 
 	Ref<InputEventScreenTouch> touch = p_event;
 	if (touch.is_valid()) {
-		if (touch->is_pressed()) {
-			if (touch_index == -1 && has_point(touch->get_position())) {
-				Rect2 base_rect = Rect2(joystick_pos - Vector2(0.5, 0.5) * joystick_size, Vector2(joystick_size, joystick_size));
-				if (joystick_mode == JOYSTICK_DYNAMIC || joystick_mode == JOYSTICK_FOLLOWING || (base_rect.has_point(touch->get_position()) && joystick_mode == JOYSTICK_FIXED)) {
-					if (joystick_mode == JOYSTICK_DYNAMIC || joystick_mode == JOYSTICK_FOLLOWING) {
-						joystick_pos = touch->get_position();
-					}
-
-					emit_signal(SceneStringName(pressed));
-
-					is_pressed = true;
-					touch_index = touch->get_index();
-					_update_joystick(touch->get_position());
-				}
-			}
-		} else if (touch->get_index() == touch_index) {
-			is_pressed = false;
-			emit_signal(SNAME("released"), input_vector);
-
-			if (!is_flick_canceled && !has_moved) {
-				emit_signal(SNAME("tapped"));
-			} else if (has_input && has_moved) {
-				emit_signal(SNAME("flicked"), input_vector);
-			}
-			_reset();
-		}
+		_handle_button(touch->get_position(), touch->get_index(), touch->is_pressed());
+		return;
 	}
-
 	Ref<InputEventScreenDrag> drag = p_event;
-	if (drag.is_valid() && drag->get_index() == touch_index) {
-		has_moved = true;
-		_update_joystick(drag->get_position());
+	if (drag.is_valid()) {
+		_handle_motion(drag->get_position(), drag->get_index());
+		return;
 	}
-
 	Ref<InputEventMouseButton> mb = p_event;
 	if (mb.is_valid() && mb->get_button_index() == MouseButton::LEFT) {
-		if (mb->is_pressed() && has_point(mb->get_position())) {
-			Rect2 base_rect = Rect2(joystick_pos - Vector2(0.5, 0.5) * joystick_size, Vector2(joystick_size, joystick_size));
-			if (joystick_mode == JOYSTICK_DYNAMIC || joystick_mode == JOYSTICK_FOLLOWING || (base_rect.has_point(mb->get_position()) && joystick_mode == JOYSTICK_FIXED)) {
-				if (joystick_mode == JOYSTICK_DYNAMIC || joystick_mode == JOYSTICK_FOLLOWING) {
-					joystick_pos = mb->get_position();
-				}
+		_handle_button(mb->get_position(), -1, mb->is_pressed());
+		return;
+	}
+	Ref<InputEventMouseMotion> mm = p_event;
+	if (mm.is_valid()) {
+		_handle_motion(mm->get_position(), -1);
+	}
+}
 
-				emit_signal(SceneStringName(pressed));
-
-				is_pressed = true;
-				_update_joystick(mb->get_position());
+void VirtualJoystick::_handle_button(const Vector2 &p_position, int p_index, bool p_pressed) {
+	if (p_pressed) {
+		if (is_pressed || !has_point(p_position)) {
+			return;
+		}
+		if (joystick_mode == JOYSTICK_FIXED) {
+			const Rect2 base_rect(joystick_pos - Vector2(0.5, 0.5) * joystick_size, Vector2(joystick_size, joystick_size));
+			if (!base_rect.has_point(p_position)) {
+				return;
 			}
 		} else {
-			is_pressed = false;
-			emit_signal(SNAME("released"), input_vector);
-			_reset();
+			joystick_pos = p_position;
 		}
+		touch_index = p_index;
+		is_pressed = true;
+		emit_signal(SceneStringName(pressed));
+		_update_joystick(p_position);
+	} else if (is_pressed && touch_index == p_index) {
+		is_pressed = false;
+		emit_signal(SNAME("released"), input_vector);
+		if (!is_flick_canceled && !has_moved) {
+			emit_signal(SNAME("tapped"));
+		} else if (has_input && has_moved) {
+			emit_signal(SNAME("flicked"), input_vector);
+		}
+		_reset();
 	}
+}
 
-	Ref<InputEventMouseMotion> mm = p_event;
-	if (mm.is_valid() && is_pressed) {
+void VirtualJoystick::_handle_motion(const Vector2 &p_position, int p_index) {
+	if (is_pressed && touch_index == p_index) {
 		has_moved = true;
-		_update_joystick(mm->get_position());
+		_update_joystick(p_position);
 	}
 }
 

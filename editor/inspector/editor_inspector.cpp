@@ -3527,14 +3527,14 @@ void EditorInspectorArray::_new_size_spin_box_text_submitted(const String &p_tex
 void EditorInspectorArray::_setup() {
 	// Setup counts.
 	count = _get_array_count();
-	begin_array_index = page * page_length;
-	end_array_index = MIN(count, (page + 1) * page_length);
 	max_page = MAX(0, count - 1) / page_length;
-	array_elements.resize(MAX(0, end_array_index - begin_array_index));
 	if (page < 0 || page > max_page) {
 		page = CLAMP(page, 0, max_page);
 		emit_signal("page_change_request", page);
 	}
+	begin_array_index = page * page_length;
+	end_array_index = MIN(count, (page + 1) * page_length);
+	array_elements.resize(MAX(0, end_array_index - begin_array_index));
 
 	Ref<Font> numbers_font;
 	int numbers_min_w = 0;
@@ -4943,8 +4943,8 @@ void EditorInspector::update_tree() {
 				String array_label = path.contains_char('/') ? path.substr(path.rfind_char('/') + 1) : path;
 				array_label = EditorPropertyNameProcessor::get_singleton()->process_name(property_label_string, property_name_style, p.name, doc_name);
 				int page = per_array_page.has(array_element_prefix) ? per_array_page[array_element_prefix] : 0;
-				editor_inspector_array->setup_with_move_element_function(object, p.hint_string, array_label, array_element_prefix, page, c, use_folding);
 				editor_inspector_array->connect("page_change_request", callable_mp(this, &EditorInspector::_page_change_request).bind(array_element_prefix));
+				editor_inspector_array->setup_with_move_element_function(object, p.hint_string, array_label, array_element_prefix, page, c, use_folding);
 			} else if (p.type == Variant::INT) {
 				// Setup the array to use the count property and built-in functions to create/move/delete elements.
 				if (class_name_components.size() >= 2) {
@@ -4956,8 +4956,8 @@ void EditorInspector::update_tree() {
 					if (property_name_style == EditorPropertyNameProcessor::STYLE_LOCALIZED) {
 						array_label = EditorPropertyNameProcessor::get_singleton()->translate_group_name(array_label);
 					}
-					editor_inspector_array->setup_with_count_property(object, p.hint_string, array_label, p.name, array_element_prefix, page, c, foldable, movable, is_const, numbered, page_size, add_button_text, swap_method);
 					editor_inspector_array->connect("page_change_request", callable_mp(this, &EditorInspector::_page_change_request).bind(array_element_prefix));
+					editor_inspector_array->setup_with_count_property(object, p.hint_string, array_label, p.name, array_element_prefix, page, c, foldable, movable, is_const, numbered, page_size, add_button_text, swap_method);
 				}
 			}
 

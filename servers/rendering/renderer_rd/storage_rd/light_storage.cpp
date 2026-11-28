@@ -48,6 +48,10 @@ LightStorage *LightStorage::get_singleton() {
 LightStorage::LightStorage() {
 	singleton = this;
 
+	// Forward+ keeps cube shadows: dual paraboloid ones distort on large polygons.
+	force_omni_dual_paraboloid = RD::get_singleton()->get_driver_workarounds().force_omni_dual_paraboloid &&
+			OS::get_singleton()->get_current_rendering_method() != "forward_plus";
+
 	TextureStorage *texture_storage = TextureStorage::get_singleton();
 
 	directional_shadow.size = GLOBAL_GET("rendering/lights_and_shadows/directional_shadow/size");
@@ -394,6 +398,9 @@ RSE::LightOmniShadowMode LightStorage::light_omni_get_shadow_mode(RID p_light) {
 	const Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL_V(light, RSE::LIGHT_OMNI_SHADOW_CUBE);
 
+	if (force_omni_dual_paraboloid) {
+		return RSE::LIGHT_OMNI_SHADOW_DUAL_PARABOLOID;
+	}
 	return light->omni_shadow_mode;
 }
 
@@ -2878,7 +2885,8 @@ LightStorage::ShadowCubemap *LightStorage::_get_shadow_cubemap(int p_size) {
 			tf.format = get_cubemap_depth_format();
 			tf.width = p_size;
 			tf.height = p_size;
-			tf.texture_type = RD::TEXTURE_TYPE_CUBE;
+			// WebGPU can't filter a depth cube, so its cube_to_dp shader loads texels from a six-layer array instead.
+			tf.texture_type = RD::get_singleton()->get_device_api_name() == "WebGPU" ? RD::TEXTURE_TYPE_2D_ARRAY : RD::TEXTURE_TYPE_CUBE;
 			tf.array_layers = 6;
 			tf.usage_bits = get_cubemap_depth_usage_bits();
 			sc.cubemap = RD::get_singleton()->texture_create(tf, RD::TextureView());

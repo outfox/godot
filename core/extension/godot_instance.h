@@ -37,6 +37,8 @@ class GodotInstance : public Object {
 	GDCLASS(GodotInstance, Object);
 
 	bool started = false;
+	bool start_attempted = false;
+	bool _iteration(double p_delta_seconds);
 
 protected:
 	static void _bind_methods();
@@ -45,11 +47,12 @@ public:
 	GodotInstance();
 	~GodotInstance();
 
-	bool initialize(GDExtensionInitializationFunction p_init_func);
+	bool initialize();
 
 	bool start();
 	bool is_started();
 	bool iteration();
+	bool iteration_with_delta(double p_delta_seconds);
 	void stop();
 
 	void focus_out();

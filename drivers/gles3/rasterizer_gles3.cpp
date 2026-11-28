@@ -393,6 +393,7 @@ RasterizerGLES3::RasterizerGLES3() {
 }
 
 RasterizerGLES3::~RasterizerGLES3() {
+	singleton = nullptr;
 }
 
 void RasterizerGLES3::_blit_render_target_to_screen(DisplayServerEnums::WindowID p_screen, const RenderingServerTypes::BlitToScreen &p_blit, bool p_first) {

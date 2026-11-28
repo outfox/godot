@@ -59,6 +59,11 @@ int Fog::_get_fog_shader_group() {
 	}
 }
 
+void Fog::enable_no_atomics_shader_groups() {
+	volumetric_fog.shader.enable_group(VolumetricFogShader::SHADER_GROUP_NO_ATOMICS);
+	volumetric_fog.process_shader.enable_group(VolumetricFogShader::SHADER_GROUP_NO_ATOMICS);
+}
+
 int Fog::_get_fog_variant() {
 	RenderingDevice *rd = RD::get_singleton();
 	bool use_32_bit_atomics = rd->has_feature(RD::SUPPORTS_IMAGE_ATOMIC_32_BIT);
@@ -809,7 +814,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 			u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 			u.binding = 1;
 			if (p_settings.shadow_atlas_depth.is_null()) {
-				u.append_id(texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK));
+				u.append_id(texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_DEPTH));
 			} else {
 				u.append_id(p_settings.shadow_atlas_depth);
 			}
@@ -825,7 +830,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 			if (p_settings.directional_shadow_depth.is_valid()) {
 				u.append_id(p_settings.directional_shadow_depth);
 			} else {
-				u.append_id(texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK));
+				u.append_id(texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_DEPTH));
 			}
 			uniforms.push_back(u);
 			copy_uniforms.push_back(u);

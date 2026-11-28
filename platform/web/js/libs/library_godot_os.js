@@ -107,7 +107,8 @@ const GodotConfig = {
 	godot_js_config_canvas_id_get__proxy: 'sync',
 	godot_js_config_canvas_id_get__sig: 'vii',
 	godot_js_config_canvas_id_get: function (p_ptr, p_ptr_max) {
-		GodotRuntime.stringToHeap(`#${GodotConfig.canvas.id}`, p_ptr, p_ptr_max);
+		const selector = Module['godotWebGPUCanvasSelector'] || `#${GodotConfig.canvas.id}`;
+		GodotRuntime.stringToHeap(selector, p_ptr, p_ptr_max);
 	},
 
 	godot_js_config_locale_get__proxy: 'sync',
@@ -249,10 +250,13 @@ const GodotOS = {
 	$GodotOS: {
 		request_quit: function () {},
 		_async_cbs: [],
+		_persistent_async_cbs: [],
 		_fs_sync_promise: null,
 
-		atexit: function (p_promise_cb) {
-			GodotOS._async_cbs.push(p_promise_cb);
+		atexit: function (p_promise_cb, p_persistent = false) {
+			// 2dog: runtime postset hooks must clean up every engine lifetime.
+			const cbs = p_persistent ? GodotOS._persistent_async_cbs : GodotOS._async_cbs;
+			cbs.push(p_promise_cb);
 		},
 
 		cleanup: function (exit_code) {
@@ -267,7 +271,10 @@ const GodotOS = {
 		finish_async: function (callback) {
 			GodotOS._fs_sync_promise.then(function (err) {
 				const promises = [];
-				GodotOS._async_cbs.forEach(function (cb) {
+				// 2dog: retain module hooks and consume this engine's audio and file-drop callbacks.
+				const cbs = GodotOS._persistent_async_cbs.concat(GodotOS._async_cbs);
+				GodotOS._async_cbs = [];
+				cbs.forEach(function (cb) {
 					promises.push(new Promise(cb));
 				});
 				return Promise.all(promises);
@@ -409,7 +416,7 @@ mergeInto(LibraryManager.library, GodotOS);
  */
 const GodotEventListeners = {
 	$GodotEventListeners__deps: ['$GodotOS'],
-	$GodotEventListeners__postset: 'GodotOS.atexit(function(resolve, reject) { GodotEventListeners.clear(); resolve(); });',
+	$GodotEventListeners__postset: 'GodotOS.atexit(function(resolve, reject) { GodotEventListeners.clear(); resolve(); }, true);',
 	$GodotEventListeners: {
 		handlers: [],
 

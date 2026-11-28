@@ -34,6 +34,7 @@
 #include "run_icon_svg.gen.h"
 
 #include "core/config/project_settings.h"
+#include "core/core_globals.h"
 #include "core/io/dir_access.h"
 #include "core/io/zip_io.h"
 #include "core/os/os.h"
@@ -46,9 +47,12 @@
 #include "scene/resources/image_texture.h"
 
 #include "modules/modules_enabled.gen.h" // IWYU pragma: keep. For mono.
+#ifdef MODULE_MONO_ENABLED
+#include "modules/mono/utils/path_utils.h"
+#endif
 #include "modules/svg/image_loader_svg.h"
 
-Error EditorExportPlatformWeb::_extract_template(const String &p_template, const String &p_dir, const String &p_name, bool pwa) {
+Error EditorExportPlatformWeb::_extract_template(const String &p_template, const String &p_dir, const String &p_name, bool pwa, bool &r_webgpu) {
 	Ref<FileAccess> io_fa;
 	zlib_filefunc_def io = zipio_create_io(&io_fa);
 	unzFile pkg = unzOpen2(p_template.utf8().get_data(), &io);
@@ -81,6 +85,15 @@ Error EditorExportPlatformWeb::_extract_template(const String &p_template, const
 		if (!pwa && (file == "godot.service.worker.js" || file == "godot.offline.html")) {
 			continue;
 		}
+		// Templates built with webgpu=yes carry this marker.
+		if (file == "webgpu.txt") {
+			r_webgpu = true;
+			continue;
+		}
+		// 2dog: libgodot/ holds link inputs for .NET hosts, which take them from the template, never from an export.
+		if (file.begins_with("libgodot/")) {
+			continue;
+		}
 		Vector<uint8_t> data;
 		data.resize(info.uncompressed_size);
 
@@ -91,6 +104,16 @@ Error EditorExportPlatformWeb::_extract_template(const String &p_template, const
 
 		//write
 		String dst = p_dir.path_join(file.replace("godot", p_name));
+		String dst_dir = dst.get_base_dir();
+		if (!DirAccess::exists(dst_dir)) {
+			Error err = DirAccess::make_dir_recursive_absolute(dst_dir);
+			if (err != OK) {
+				add_message(EXPORT_MESSAGE_ERROR, TTR("Prepare Templates"), vformat(TTR("Could not create directory: \"%s\"."), dst_dir));
+				unzClose(pkg);
+				return err;
+			}
+		}
+
 		Ref<FileAccess> f = FileAccess::open(dst, FileAccess::WRITE);
 		if (f.is_null()) {
 			add_message(EXPORT_MESSAGE_ERROR, TTR("Prepare Templates"), vformat(TTR("Could not write file: \"%s\"."), dst));
@@ -132,7 +155,7 @@ void EditorExportPlatformWeb::_replace_strings(const HashMap<String, String> &p_
 	}
 }
 
-void EditorExportPlatformWeb::_fix_html(Vector<uint8_t> &p_html, const Ref<EditorExportPreset> &p_preset, const String &p_name, bool p_debug, BitField<EditorExportPlatform::DebugFlags> p_flags, const Vector<SharedObject> p_shared_objects, const Dictionary &p_file_sizes) {
+void EditorExportPlatformWeb::_fix_html(Vector<uint8_t> &p_html, const Ref<EditorExportPreset> &p_preset, const String &p_name, bool p_debug, BitField<EditorExportPlatform::DebugFlags> p_flags, const Vector<SharedObject> p_shared_objects, const Dictionary &p_file_sizes, bool p_webgpu) {
 	// Engine.js config
 	Dictionary config;
 	Array libs;
@@ -152,6 +175,11 @@ void EditorExportPlatformWeb::_fix_html(Vector<uint8_t> &p_html, const Ref<Edito
 	config["args"] = args;
 	config["fileSizes"] = p_file_sizes;
 	config["ensureCrossOriginIsolationHeaders"] = (bool)p_preset->get("progressive_web_app/ensure_cross_origin_isolation_headers");
+
+	// Pass the rendering driver so the HTML shell can pre-initialize WebGPU if needed.
+	const String rendering_method = get_project_setting(p_preset, "rendering/renderer/rendering_method.web");
+	const bool webgpu = p_webgpu && (rendering_method == "forward_plus" || rendering_method == "mobile");
+	config["renderingDriver"] = webgpu ? "webgpu" : "opengl3";
 
 	config["godotPoolSize"] = p_preset->get("threads/godot_pool_size");
 	config["emscriptenPoolSize"] = p_preset->get("threads/emscripten_pool_size");
@@ -364,6 +392,9 @@ void EditorExportPlatformWeb::get_preset_features(const Ref<EditorExportPreset> 
 	} else {
 		r_features->push_back("web_noextensions");
 	}
+	if (p_preset->get("shader_baker/enabled")) {
+		r_features->push_back("shader_baker");
+	}
 	r_features->push_back("wasm32");
 }
 
@@ -394,6 +425,7 @@ void EditorExportPlatformWeb::get_export_options(List<ExportOption> *r_options) 
 
 	r_options->push_back(ExportOption(PropertyInfo(Variant::INT, "threads/emscripten_pool_size"), 8));
 	r_options->push_back(ExportOption(PropertyInfo(Variant::INT, "threads/godot_pool_size"), 4));
+	r_options->push_back(ExportOption(PropertyInfo(Variant::BOOL, "shader_baker/enabled"), false));
 }
 
 bool EditorExportPlatformWeb::get_export_option_visibility(const EditorExportPreset *p_preset, const String &p_option) const {
@@ -422,17 +454,28 @@ Ref<Texture2D> EditorExportPlatformWeb::get_logo() const {
 }
 
 bool EditorExportPlatformWeb::has_valid_export_configuration(const Ref<EditorExportPreset> &p_preset, String &r_error, bool &r_missing_templates, bool p_debug) const {
-#ifdef MODULE_MONO_ENABLED
-	// Don't check for additional errors, as this particular error cannot be resolved.
-	r_error += TTR("Exporting to Web is currently not supported in Godot 4 when using C#/.NET. Use Godot 3 to target Web with C#/Mono instead.") + "\n";
-	r_error += TTR("If this project does not use C#, use a non-C# editor build to export the project.") + "\n";
-	return false;
-#else
-
 	String err;
 	bool valid = false;
 	bool extensions = (bool)p_preset->get("variant/extensions_support");
 	bool thread_support = (bool)p_preset->get("variant/thread_support");
+
+#ifdef MODULE_MONO_ENABLED
+	// 2dog: mirrors the managed ExportPlugin, which rejects playable C# web exports outside libgodot hosts.
+	// Pack exports do not pass through here, so the PCK/ZIP workflow stays available.
+	String sln_dir = GLOBAL_GET("dotnet/project/solution_directory");
+	sln_dir = sln_dir.begins_with("res://") ? sln_dir : "res://" + sln_dir;
+	if (!CoreGlobals::libgodot_host_instance && !OS::get_singleton()->get_cmdline_user_args().find("--2dog-host-pack") &&
+			FileAccess::exists(sln_dir.path_join(Path::get_csharp_project_name() + ".sln"))) {
+		r_error += TTR("C# web exports from the Godot editor are not supported; publish a 2dog web host instead.") + "\n";
+		return false;
+	}
+	// 2dog: .NET web export remains experimental.
+	err += TTR("Exporting to Web when using C#/.NET is experimental.") + "\n";
+	if (extensions) {
+		r_error += TTR("Exporting C#/.NET with GDExtensions is currently not supported.") + "\n";
+		return false;
+	}
+#endif
 
 	// Look for export templates (first official, and if defined custom templates).
 	bool dvalid = exists_export_template(_get_template_name(extensions, thread_support, true), &err);
@@ -459,7 +502,6 @@ bool EditorExportPlatformWeb::has_valid_export_configuration(const Ref<EditorExp
 	}
 
 	return valid;
-#endif // !MODULE_MONO_ENABLED
 }
 
 bool EditorExportPlatformWeb::has_valid_project_configuration(const Ref<EditorExportPreset> &p_preset, String &r_error) const {
@@ -477,6 +519,11 @@ bool EditorExportPlatformWeb::has_valid_project_configuration(const Ref<EditorEx
 		}
 	}
 
+	const String rendering_method = get_project_setting(p_preset, "rendering/renderer/rendering_method.web");
+	if (rendering_method == "forward_plus" || rendering_method == "mobile") {
+		err += TTR("WebGPU rendering is experimental. Ensure your target browsers support WebGPU.") + "\n";
+	}
+
 	if (!err.is_empty()) {
 		r_error = err;
 	}
@@ -491,8 +538,6 @@ List<String> EditorExportPlatformWeb::get_binary_extensions(const Ref<EditorExpo
 }
 
 Error EditorExportPlatformWeb::export_project(const Ref<EditorExportPreset> &p_preset, bool p_debug, const String &p_path, BitField<EditorExportPlatform::DebugFlags> p_flags, bool p_notify) {
-	ExportNotifier notifier(*this, p_preset, p_debug, p_path, p_flags, p_notify);
-
 	const String custom_debug = p_preset->get("custom_template/debug");
 	const String custom_release = p_preset->get("custom_template/release");
 	const String custom_html = p_preset->get("html/custom_html_shell");
@@ -522,10 +567,29 @@ Error EditorExportPlatformWeb::export_project(const Ref<EditorExportPreset> &p_p
 		return ERR_FILE_NOT_FOUND;
 	}
 
+	// Extract templates.
+	bool webgpu = false;
+	Error error = _extract_template(template_path, base_dir, base_name, pwa, webgpu);
+	if (error) {
+		// Message is supplied by the subroutine method.
+		return error;
+	}
+	const String rendering_method = get_project_setting(p_preset, "rendering/renderer/rendering_method.web");
+	if (!webgpu && (rendering_method == "forward_plus" || rendering_method == "mobile")) {
+		add_message(EXPORT_MESSAGE_WARNING, TTR("Export"), TTR("The Forward+ and Mobile renderers require a Web export template built with WebGPU support (webgpu=yes)."));
+	}
+
+	ExportNotifier notifier(*this, p_preset, p_debug, p_path, p_flags, p_notify);
+
+	// Check if any export plugin failed.
+	if (get_worst_message_type() == EXPORT_MESSAGE_ERROR) {
+		return ERR_SCRIPT_FAILED;
+	}
+
 	// Export pck and shared objects
 	Vector<SharedObject> shared_objects;
 	String pck_path = base_path + ".pck";
-	Error error = save_pack(p_preset, p_debug, pck_path, &shared_objects);
+	error = save_pack(p_preset, p_debug, pck_path, &shared_objects);
 	if (error != OK) {
 		add_message(EXPORT_MESSAGE_ERROR, TTR("Export"), vformat(TTR("Could not write file: \"%s\"."), pck_path));
 		return error;
@@ -541,13 +605,6 @@ Error EditorExportPlatformWeb::export_project(const Ref<EditorExportPreset> &p_p
 				return error;
 			}
 		}
-	}
-
-	// Extract templates.
-	error = _extract_template(template_path, base_dir, base_name, pwa);
-	if (error) {
-		// Message is supplied by the subroutine method.
-		return error;
 	}
 
 	// Parse generated file sizes (pck and wasm, to help show a meaningful loading bar).
@@ -574,7 +631,7 @@ Error EditorExportPlatformWeb::export_project(const Ref<EditorExportPreset> &p_p
 	f.unref(); // close file.
 
 	// Generate HTML file with replaced strings.
-	_fix_html(html, p_preset, base_name, p_debug, p_flags, shared_objects, file_sizes);
+	_fix_html(html, p_preset, base_name, p_debug, p_flags, shared_objects, file_sizes, webgpu);
 	Error err = _write_or_error(html.ptr(), html.size(), p_path);
 	if (err != OK) {
 		// Message is supplied by the subroutine method.
@@ -854,18 +911,12 @@ Error EditorExportPlatformWeb::_export_project(const Ref<EditorExportPreset> &p_
 	Error err = export_project(p_preset, true, basepath + ".html", p_debug_flags);
 	if (err != OK) {
 		// Export generates several files, clean them up on failure.
-		DirAccess::remove_file_or_error(basepath + ".html");
-		DirAccess::remove_file_or_error(basepath + ".offline.html");
-		DirAccess::remove_file_or_error(basepath + ".js");
-		DirAccess::remove_file_or_error(basepath + ".audio.worklet.js");
-		DirAccess::remove_file_or_error(basepath + ".audio.position.worklet.js");
-		DirAccess::remove_file_or_error(basepath + ".service.worker.js");
-		DirAccess::remove_file_or_error(basepath + ".pck");
-		DirAccess::remove_file_or_error(basepath + ".png");
-		DirAccess::remove_file_or_error(basepath + ".side.wasm");
-		DirAccess::remove_file_or_error(basepath + ".wasm");
-		DirAccess::remove_file_or_error(basepath + ".icon.png");
-		DirAccess::remove_file_or_error(basepath + ".apple-touch-icon.png");
+		if (DirAccess::exists(dest)) {
+			Ref<DirAccess> dest_da = DirAccess::open(dest);
+			if (dest_da.is_valid() && dest_da->erase_contents_recursive() != OK) {
+				add_message(EXPORT_MESSAGE_WARNING, TTR("Run"), vformat(TTR("Could not clean HTTP server directory: %s."), dest));
+			}
+		}
 	}
 	return err;
 }

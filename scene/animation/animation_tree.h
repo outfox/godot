@@ -285,7 +285,7 @@ struct AnimationNodeInstance {
 	LocalVector<Variant *> parameter_ptrs_by_slot;
 
 	mutable LocalVector<AnimationNodeInstance *> connection_instances; // AnimationNodeInstance* | nullptr
-	mutable LocalVector<real_t> track_weights;
+	mutable Vector<real_t> track_weights;
 	mutable bool blended = false;
 	mutable LocalVector<int> filtered_track_indices_cache;
 	mutable uint32_t filters_version = 0;

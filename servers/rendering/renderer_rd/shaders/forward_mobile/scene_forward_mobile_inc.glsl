@@ -1,6 +1,11 @@
 #define M_PI 3.14159265359
 #define MAX_VIEWS 2
 
+#ifdef RENDER_DRIVER_WEBGPU
+// Streaming feedback needs subgroups WebGPU lacks.
+#undef TEXTURE_STREAMING
+#endif
+
 #include "../decal_data_inc.glsl"
 #include "../oct_inc.glsl"
 #include "../scene_data_inc.glsl"
@@ -174,6 +179,14 @@ uint sc_directional_penumbra_shadow_samples() {
 #define SHADER_COUNT_MULTIPLE 2
 
 uint option_to_count(uint option, uint bound) {
+#ifdef RENDER_DRIVER_WEBGPU
+	// Single-return pattern to avoid SPIR-V phi/emit scoping issues in Tint.
+	uint result = bound;
+	if (option == SHADER_COUNT_NONE) {
+		result = 0u;
+	} else if (option == SHADER_COUNT_SINGLE) {
+		result = 1u;
+#else
 	switch (option) {
 		case SHADER_COUNT_NONE:
 			return 0;
@@ -181,7 +194,11 @@ uint option_to_count(uint option, uint bound) {
 			return 1;
 		case SHADER_COUNT_MULTIPLE:
 			return bound;
+#endif
 	}
+#ifdef RENDER_DRIVER_WEBGPU
+	return result;
+#endif
 }
 
 uint sc_omni_lights(uint bound) {

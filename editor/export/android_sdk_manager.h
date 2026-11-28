@@ -63,7 +63,8 @@ class AndroidSDKManager : public AcceptDialog {
 	void _download_android_cli();
 	void _android_cli_downloaded(const PackedByteArray &p_body);
 	void _install_android_sdk_packages();
-	void _android_sdk_installed(int p_exit_code);
+	void _android_sdk_installed();
+	void _android_sdk_install_failed(const String &p_message);
 
 	void _setup_java_sdk();
 	void _download_java_sdk();
@@ -89,6 +90,8 @@ class AndroidSDKManager : public AcceptDialog {
 	Callable on_setup_completed;
 	Callable on_setup_cancelled;
 	ProcessID setup_android_pid = -1;
+	Ref<FileAccess> package_pipes[2];
+	PackedByteArray package_output[2];
 	int index_sdk_package_being_installed = 0;
 	Label *setup_label = nullptr;
 	RichTextLabel *execute_outputs = nullptr;

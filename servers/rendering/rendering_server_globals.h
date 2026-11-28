@@ -49,6 +49,9 @@ class RenderingMethod;
 class RenderingServerGlobals {
 public:
 	static inline bool threaded = false;
+	// Counts scene draws left out because their pipeline was still compiling (web only). Whoever caches a render
+	// compares it before and after, and renders again if it changed.
+	static inline uint64_t pipeline_skipped_draws = 0;
 
 	static inline RendererUtilities *utilities = nullptr;
 	static inline RendererLightStorage *light_storage = nullptr;

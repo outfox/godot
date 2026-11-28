@@ -34,15 +34,11 @@
 
 const GodotIME = {
 	$GodotIME__deps: ['$GodotRuntime', '$GodotEventListeners'],
-	$GodotIME__postset: 'GodotOS.atexit(function(resolve, reject) { GodotIME.clear(); resolve(); });',
+	$GodotIME__postset: 'GodotOS.atexit(function(resolve, reject) { GodotIME.clear(); resolve(); }, true);',
 	$GodotIME: {
 		ime: null,
 		active: false,
 		focusTimerIntervalId: -1,
-
-		getModifiers: function (evt) {
-			return (evt.shiftKey + 0) + ((evt.altKey + 0) << 1) + ((evt.ctrlKey + 0) << 2) + ((evt.metaKey + 0) << 3);
-		},
 
 		ime_active: function (active) {
 			function clearFocusTimerInterval() {
@@ -82,8 +78,9 @@ const GodotIME = {
 			}
 			const canvas = GodotConfig.canvas;
 			const rect = canvas.getBoundingClientRect();
-			const rw = canvas.width / rect.width;
-			const rh = canvas.height / rect.height;
+			const size = Module['godotWebGPUSize'] || canvas;
+			const rw = size.width / rect.width;
+			const rh = size.height / rect.height;
 			const clx = (x / rw) + rect.x;
 			const cly = (y / rh) + rect.y;
 
@@ -91,14 +88,7 @@ const GodotIME = {
 			GodotIME.ime.style.top = `${cly}px`;
 		},
 
-		init: function (ime_cb, key_cb, code, key) {
-			function key_event_cb(pressed, evt) {
-				const modifiers = GodotIME.getModifiers(evt);
-				GodotRuntime.stringToHeap(evt.code, code, 32);
-				GodotRuntime.stringToHeap(evt.key, key, 32);
-				key_cb(pressed, evt.repeat, modifiers);
-				evt.preventDefault();
-			}
+		init: function (ime_cb, onKeyEvent) {
 			function ime_event_cb(event) {
 				if (GodotIME.ime == null) {
 					return;
@@ -142,8 +132,8 @@ const GodotIME = {
 			GodotEventListeners.add(ime, 'compositionstart', ime_event_cb, false);
 			GodotEventListeners.add(ime, 'compositionupdate', ime_event_cb, false);
 			GodotEventListeners.add(ime, 'compositionend', ime_event_cb, false);
-			GodotEventListeners.add(ime, 'keydown', key_event_cb.bind(null, 1), false);
-			GodotEventListeners.add(ime, 'keyup', key_event_cb.bind(null, 0), false);
+			GodotEventListeners.add(ime, 'keydown', onKeyEvent.bind(null, true), false);
+			GodotEventListeners.add(ime, 'keyup', onKeyEvent.bind(null, false), false);
 
 			ime.onblur = function () {
 				this.style.display = 'none';
@@ -451,6 +441,7 @@ const GodotInput = {
 	$GodotInput: {
 		inputKeyCallback: null,
 		setInputKeyData: null,
+		pressedShifts: null,
 
 		getModifiers: function (evt) {
 			return (evt.shiftKey + 0) + ((evt.altKey + 0) << 1) + ((evt.ctrlKey + 0) << 2) + ((evt.metaKey + 0) << 3);
@@ -458,8 +449,9 @@ const GodotInput = {
 
 		computePosition: function (evt, rect) {
 			const canvas = GodotConfig.canvas;
-			const rw = canvas.width / rect.width;
-			const rh = canvas.height / rect.height;
+			const size = Module['godotWebGPUSize'] || canvas;
+			const rw = size.width / rect.width;
+			const rh = size.height / rect.height;
 			const x = (evt.clientX - rect.x) * rw;
 			const y = (evt.clientY - rect.y) * rh;
 			return [x, y];
@@ -474,8 +466,25 @@ const GodotInput = {
 			}
 
 			const modifiers = GodotInput.getModifiers(pEvent);
+			let repeat = pEvent.repeat;
+			if (pEvent.code === 'ShiftLeft' || pEvent.code === 'ShiftRight') {
+				const held = GodotInput.pressedShifts;
+				if (pIsPressed) {
+					// Windows browsers can mark the other Shift's first press as a repeat.
+					repeat &&= held.has(pEvent.code);
+					held.add(pEvent.code);
+				} else {
+					held.delete(pEvent.code);
+					const other = pEvent.code === 'ShiftLeft' ? 'ShiftRight' : 'ShiftLeft';
+					if (!pEvent.shiftKey && held.delete(other)) {
+						// Some browsers report only the last release. Both sides are now up.
+						GodotInput.setInputKeyData(other, pEvent.key);
+						GodotInput.inputKeyCallback(0, false, modifiers);
+					}
+				}
+			}
 			GodotInput.setInputKeyData(pEvent.code, pEvent.key);
-			GodotInput.inputKeyCallback(pIsPressed ? 1 : 0, pEvent.repeat, modifiers);
+			GodotInput.inputKeyCallback(pIsPressed ? 1 : 0, repeat, modifiers);
 			pEvent.preventDefault();
 		},
 	},
@@ -492,8 +501,9 @@ const GodotInput = {
 			const rect = canvas.getBoundingClientRect();
 			const pos = GodotInput.computePosition(evt, rect);
 			// Scale movement
-			const rw = canvas.width / rect.width;
-			const rh = canvas.height / rect.height;
+			const size = Module['godotWebGPUSize'] || canvas;
+			const rw = size.width / rect.width;
+			const rh = size.height / rect.height;
 			const rel_pos_x = evt.movementX * rw;
 			const rel_pos_y = evt.movementY * rh;
 			const modifiers = GodotInput.getModifiers(evt);
@@ -577,12 +587,14 @@ const GodotInput = {
 	godot_js_input_key_cb__sig: 'viii',
 	godot_js_input_key_cb: function (pCallback, pCodePtr, pKeyPtr) {
 		GodotInput.inputKeyCallback = GodotRuntime.get_func(pCallback);
+		GodotInput.pressedShifts = new Set();
 		GodotInput.setInputKeyData = (pCode, pKey) => {
 			GodotRuntime.stringToHeap(pCode, pCodePtr, 32);
 			GodotRuntime.stringToHeap(pKey, pKeyPtr, 32);
 		};
 		GodotEventListeners.add(GodotConfig.canvas, 'keydown', GodotInput.onKeyEvent.bind(null, true), false);
 		GodotEventListeners.add(GodotConfig.canvas, 'keyup', GodotInput.onKeyEvent.bind(null, false), false);
+		GodotEventListeners.add(window, 'blur', () => GodotInput.pressedShifts.clear(), false);
 	},
 
 	/*
@@ -601,11 +613,9 @@ const GodotInput = {
 	},
 
 	godot_js_set_ime_cb__proxy: 'sync',
-	godot_js_set_ime_cb__sig: 'viiii',
-	godot_js_set_ime_cb: function (p_ime_cb, p_key_cb, code, key) {
-		const ime_cb = GodotRuntime.get_func(p_ime_cb);
-		const key_cb = GodotRuntime.get_func(p_key_cb);
-		GodotIME.init(ime_cb, key_cb, code, key);
+	godot_js_set_ime_cb__sig: 'vi',
+	godot_js_set_ime_cb: function (p_ime_cb) {
+		GodotIME.init(GodotRuntime.get_func(p_ime_cb), GodotInput.onKeyEvent);
 	},
 
 	godot_js_is_ime_focused__proxy: 'sync',

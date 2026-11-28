@@ -515,6 +515,10 @@ double MainTimerSync::get_cpu_process_step() {
 }
 
 MainTimerSync::MainTimerSync() {
+	reset_step_history();
+}
+
+void MainTimerSync::reset_step_history() {
 	for (int i = CONTROL_STEPS - 1; i >= 0; --i) {
 		typical_physics_steps[i] = i;
 		accumulated_physics_steps[i] = i;
@@ -537,7 +541,27 @@ void MainTimerSync::set_fixed_fps(int p_fixed_fps) {
 
 // advance one physics frame, return timesteps to take
 MainFrameTime MainTimerSync::advance(double p_physics_step, int p_physics_ticks_per_second) {
+	if (host_timed) {
+		reset_step_history();
+		_delta_smoother = DeltaSmoother();
+		time_deficit = 0.0;
+		host_timed = false;
+	}
 	double cpu_process_step = get_cpu_process_step();
 
 	return advance_checked(p_physics_step, p_physics_ticks_per_second, cpu_process_step);
+}
+
+MainFrameTime MainTimerSync::advance_with_delta(double p_delta_seconds, int p_physics_ticks_per_second, int p_max_physics_steps) {
+	host_timed = true;
+	last_cpu_ticks_usec = current_cpu_ticks_usec;
+
+	// Whole seconds contribute an integral number of ticks. Keep them out of the fractional phase calculation.
+	double seconds;
+	const double subsecond = std::modf(p_delta_seconds, &seconds);
+	double ticks;
+	const double fraction = std::modf((MAX(time_accum, 0.0) + subsecond) * p_physics_ticks_per_second, &ticks);
+	time_accum = fraction / p_physics_ticks_per_second;
+	const double due = MIN(seconds, double(p_max_physics_steps)) * p_physics_ticks_per_second + ticks;
+	return { p_delta_seconds, int(MIN(due, double(p_max_physics_steps))), fraction };
 }

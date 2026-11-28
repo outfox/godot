@@ -13,6 +13,9 @@
     <Optimize>true</Optimize>
 
     <AnalysisMode>Recommended</AnalysisMode>
+
+    <!-- 2dog: reflection boundaries are trim-annotated; trimmed publishes also root this assembly. -->
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -152,6 +155,17 @@
   <!-- Compat Sources -->
   <ItemGroup Condition=" '$(GodotNoDeprecated)' == '' ">
     <Compile Include="Compat.cs" />
+  </ItemGroup>
+
+  <!-- 2dog: disable runtime marshalling for this assembly. -->
+  <ItemGroup>
+    <Compile Include="DisableRuntimeMarshalling.cs" />
+  </ItemGroup>
+
+  <!-- 2dog: keep upstream host bridge sources as unpacked references; twodog owns the implementation. -->
+  <ItemGroup>
+    <Compile Remove="SourceFiles\**\*.cs" />
+    <None Include="SourceFiles\**\*.cs" />
   </ItemGroup>
 
   <!--

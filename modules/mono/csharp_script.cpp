@@ -53,6 +53,7 @@
 #endif
 
 #include "core/config/engine.h"
+#include "core/core_globals.h"
 #include "core/config/project_settings.h"
 #include "core/debugger/engine_debugger.h"
 #include "core/debugger/script_debugger.h"
@@ -143,7 +144,7 @@ void CSharpLanguage::finalize() {
 	}
 
 	if (gdmono && gdmono->is_runtime_initialized() && GDMonoCache::godot_api_cache_updated) {
-		GDMonoCache::managed_callbacks.DisposablesTracker_OnGodotShuttingDown();
+		GDMonoCache::managed_callbacks.DisposablesTracker_OnGodotShuttingDown(CoreGlobals::engine_reinit_enabled);
 	}
 
 	finalizing = true;
@@ -166,6 +167,8 @@ void CSharpLanguage::finalize() {
 		memdelete(gdmono);
 		gdmono = nullptr;
 	}
+	// 2dog: the callbacks belong to the finished engine lifetime; the next GDMono::initialize() refreshes them.
+	GDMonoCache::godot_api_cache_updated = false;
 
 	// Clear here, after finalizing all domains to make sure there is nothing else referencing the elements.
 	script_bindings.clear();
@@ -1268,7 +1271,8 @@ GDExtensionBool CSharpLanguage::_instance_binding_reference_callback(void *p_tok
 
 	if (p_reference) {
 		// Refcount incremented
-		if (refcount > 1 && gchandle.is_weak()) { // The managed side also holds a reference, hence 1 instead of 0
+		// 2dog: a released weak handle is what a collected managed instance leaves behind; there is nothing to swap.
+		if (refcount > 1 && gchandle.is_weak() && !gchandle.is_released()) { // The managed side also holds a reference, hence 1 instead of 0
 			// The reference count was increased after the managed side was the only one referencing our owner.
 			// This means the owner is being referenced again by the unmanaged side,
 			// so the owner must hold the managed side alive again to avoid it from being GCed.
@@ -1911,9 +1915,10 @@ void CSharpInstance::mono_object_disposed(GCHandleIntPtr p_gchandle_to_free) {
 }
 
 void CSharpInstance::mono_object_disposed_baseref(GCHandleIntPtr p_gchandle_to_free, bool p_is_finalizer, bool &r_delete_owner, bool &r_remove_script_instance) {
+	// 2dog: the handle may already be released: referencing the owner after its managed instance was collected
+	// frees it (see refcount_incremented), and the finalizer of that instance still ends up here.
 #ifdef DEBUG_ENABLED
 	CRASH_COND(!base_ref_counted);
-	CRASH_COND(gchandle.is_released());
 #endif // DEBUG_ENABLED
 
 	// Must make sure event signals are not left dangling
@@ -1980,7 +1985,8 @@ void CSharpInstance::refcount_incremented() {
 
 	RefCounted *rc_owner = Object::cast_to<RefCounted>(owner);
 
-	if (rc_owner->get_reference_count() > 1 && gchandle.is_weak()) { // The managed side also holds a reference, hence 1 instead of 0
+	// 2dog: a released weak handle is what a collected managed instance leaves behind; there is nothing to swap.
+	if (rc_owner->get_reference_count() > 1 && gchandle.is_weak() && !gchandle.is_released()) { // The managed side also holds a reference, hence 1 instead of 0
 		// The reference count was increased after the managed side was the only one referencing our owner.
 		// This means the owner is being referenced again by the unmanaged side,
 		// so the owner must hold the managed side alive again to avoid it from being GCed.

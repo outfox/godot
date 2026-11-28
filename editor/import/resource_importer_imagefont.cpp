@@ -125,9 +125,9 @@ Error ResourceImporterImageFont::import(ResourceUID::ID p_source_id, const Strin
 
 	int32_t pos = 0;
 	for (const String &range : ranges) {
-		Vector<int32_t> list;
-		int32_t start = -1;
-		int32_t end = -1;
+		Vector<int64_t> list;
+		int64_t start = -1;
+		int64_t end = -1;
 		int chr_adv = 0;
 		Vector2i chr_off;
 
@@ -289,7 +289,14 @@ Error ResourceImporterImageFont::import(ResourceUID::ID p_source_id, const Strin
 				list.push_back(end);
 			}
 
-			if (start < 0 || start > 0x10FFFF || end < 0 || end > 0x10FFFF) {
+			bool invalid = start < 0 || start > 0x10FFFF || end < 0 || end > 0x10FFFF;
+			for (int64_t codepoint : list) {
+				if (codepoint < 0 || codepoint > 0x10FFFF) {
+					invalid = true;
+					break;
+				}
+			}
+			if (invalid) {
 				WARN_PRINT(vformat("Invalid range: \"%s\"", range));
 				continue;
 			}

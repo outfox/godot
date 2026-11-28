@@ -87,9 +87,10 @@ Object *godotsharp_engine_get_singleton(const String *p_name) {
 	return Engine::get_singleton()->get_singleton_object(*p_name);
 }
 
-int64_t godotsharp_stack_info_vector_resize(
+// 2dog: these Error results stay int32_t to match the declarations in NativeFuncs.cs, which wasm requires exactly.
+int32_t godotsharp_stack_info_vector_resize(
 		Vector<ScriptLanguage::StackInfo> *p_stack_info_vector, int p_size) {
-	return (int64_t)p_stack_info_vector->resize(p_size);
+	return (int32_t)p_stack_info_vector->resize(p_size);
 }
 
 void godotsharp_stack_info_vector_destroy(
@@ -206,7 +207,9 @@ void godotsharp_internal_refcounted_disposed(Object *p_ptr, GCHandleIntPtr p_gch
 			CSharpScriptBinding &script_binding = ((RBMap<Object *, CSharpScriptBinding>::Element *)data)->get();
 			if (script_binding.inited) {
 				if (!script_binding.gchandle.is_released()) {
-					if (rc->get_reference_count() == 1 && script_binding.gchandle.is_weak()) {
+					// 2dog: a wrapper that passes no handle was replaced after it was collected. The binding's handle
+					// belongs to its replacement and must stay.
+					if (p_gchandle_to_free.value && rc->get_reference_count() == 1 && script_binding.gchandle.is_weak()) {
 						// The GCHandle is just swapped, so get the swapped handle to release
 						// See: CSharpLanguage::_instance_binding_reference_callback(void *p_token, void *p_binding, GDExtensionBool p_reference)
 						p_gchandle_to_free = script_binding.gchandle.get_intptr();
@@ -218,9 +221,9 @@ void godotsharp_internal_refcounted_disposed(Object *p_ptr, GCHandleIntPtr p_gch
 	}
 }
 
-int64_t godotsharp_internal_signal_awaiter_connect(Object *p_source, StringName *p_signal, Object *p_target, GCHandleIntPtr p_awaiter_handle_ptr) {
+int32_t godotsharp_internal_signal_awaiter_connect(Object *p_source, StringName *p_signal, Object *p_target, GCHandleIntPtr p_awaiter_handle_ptr) {
 	StringName signal = p_signal ? *p_signal : StringName();
-	return (int64_t)gd_mono_connect_signal_awaiter(p_source, signal, p_target, p_awaiter_handle_ptr);
+	return (int32_t)gd_mono_connect_signal_awaiter(p_source, signal, p_target, p_awaiter_handle_ptr);
 }
 
 GCHandleIntPtr godotsharp_internal_unmanaged_get_script_instance_managed(Object *p_unmanaged, bool *r_has_cs_script_instance) {
@@ -584,6 +587,7 @@ float godotsharp_color_get_ok_hsl_l(const Color *p_self) {
 // gdnative.h
 
 void godotsharp_method_bind_ptrcall(MethodBind *p_method_bind, Object *p_instance, const void **p_args, void *p_ret) {
+	ERR_FAIL_NULL_MSG(p_method_bind, "This method is not available in this Godot build."); // 2dog: see ClassDB_get_method_with_compatibility.
 	p_method_bind->ptrcall(p_instance, p_args, p_ret);
 }
 
@@ -592,6 +596,11 @@ godot_variant godotsharp_method_bind_call(MethodBind *p_method_bind, Object *p_i
 	memnew_placement(&ret, Variant());
 
 	Variant *ret_val = (Variant *)&ret;
+
+	if (unlikely(p_method_bind == nullptr)) {
+		p_call_error->error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
+		return ret;
+	}
 
 	*ret_val = p_method_bind->call(p_instance, (const Variant **)p_args, p_arg_count, *p_call_error);
 
@@ -696,11 +705,8 @@ double godotsharp_variant_as_float(const Variant *p_self) {
 	return p_self->operator double();
 }
 
-godot_string godotsharp_variant_as_string(const Variant *p_self) {
-	godot_string raw_dest;
-	String *dest = (String *)&raw_dest;
-	memnew_placement(dest, String(p_self->operator String()));
-	return raw_dest;
+void godotsharp_variant_as_string(const Variant *p_self, godot_string *r_dest) {
+	memnew_placement(r_dest, String(p_self->operator String()));
 }
 
 godot_vector2 godotsharp_variant_as_vector2(const Variant *p_self) {
@@ -815,25 +821,16 @@ godot_color godotsharp_variant_as_color(const Variant *p_self) {
 	return raw_dest;
 }
 
-godot_string_name godotsharp_variant_as_string_name(const Variant *p_self) {
-	godot_string_name raw_dest;
-	StringName *dest = (StringName *)&raw_dest;
-	memnew_placement(dest, StringName(p_self->operator StringName()));
-	return raw_dest;
+void godotsharp_variant_as_string_name(const Variant *p_self, godot_string_name *r_dest) {
+	memnew_placement(r_dest, StringName(p_self->operator StringName()));
 }
 
-godot_node_path godotsharp_variant_as_node_path(const Variant *p_self) {
-	godot_node_path raw_dest;
-	NodePath *dest = (NodePath *)&raw_dest;
-	memnew_placement(dest, NodePath(p_self->operator NodePath()));
-	return raw_dest;
+void godotsharp_variant_as_node_path(const Variant *p_self, godot_node_path *r_dest) {
+	memnew_placement(r_dest, NodePath(p_self->operator NodePath()));
 }
 
-godot_rid godotsharp_variant_as_rid(const Variant *p_self) {
-	godot_rid raw_dest;
-	RID *dest = (RID *)&raw_dest;
-	memnew_placement(dest, RID(p_self->operator ::RID()));
-	return raw_dest;
+void godotsharp_variant_as_rid(const Variant *p_self, godot_rid *r_dest) {
+	memnew_placement(r_dest, RID(p_self->operator ::RID()));
 }
 
 godot_callable godotsharp_variant_as_callable(const Variant *p_self) {
@@ -1150,8 +1147,8 @@ void godotsharp_array_remove_at(Array *p_self, int32_t p_index) {
 	p_self->remove_at(p_index);
 }
 
-int64_t godotsharp_array_resize(Array *p_self, int32_t p_new_size) {
-	return (int64_t)p_self->resize(p_new_size);
+int32_t godotsharp_array_resize(Array *p_self, int32_t p_new_size) {
+	return (int32_t)p_self->resize(p_new_size);
 }
 
 void godotsharp_array_reverse(Array *p_self) {

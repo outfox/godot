@@ -30,6 +30,7 @@
 
 #include "godot_instance.h"
 
+#include "core/core_globals.h"
 #include "core/extension/gdextension_manager.h"
 #include "core/object/class_db.h"
 #include "core/os/main_loop.h"
@@ -41,6 +42,7 @@ void GodotInstance::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("start"), &GodotInstance::start);
 	ClassDB::bind_method(D_METHOD("is_started"), &GodotInstance::is_started);
 	ClassDB::bind_method(D_METHOD("iteration"), &GodotInstance::iteration);
+	ClassDB::bind_method(D_METHOD("iteration_with_delta", "delta_seconds"), &GodotInstance::iteration_with_delta);
 	ClassDB::bind_method(D_METHOD("focus_in"), &GodotInstance::focus_in);
 	ClassDB::bind_method(D_METHOD("focus_out"), &GodotInstance::focus_out);
 	ClassDB::bind_method(D_METHOD("pause"), &GodotInstance::pause);
@@ -53,23 +55,33 @@ GodotInstance::GodotInstance() {
 GodotInstance::~GodotInstance() {
 }
 
-bool GodotInstance::initialize(GDExtensionInitializationFunction p_init_func) {
-	print_verbose("Godot Instance initialization");
-	GDExtensionManager *gdextension_manager = GDExtensionManager::get_singleton();
-	GDExtensionPtr<const GDExtensionInitializationFunction> ptr((const GDExtensionInitializationFunction *)&p_init_func);
-	GDExtensionManager::LoadStatus status = gdextension_manager->load_extension_from_function("libgodot://main", ptr);
-	return status == GDExtensionManager::LoadStatus::LOAD_STATUS_OK;
+bool GodotInstance::initialize() {
+	if (CoreGlobals::global_load_status_libgodot == GDExtensionManager::LoadStatus::LOAD_STATUS_OK) {
+		print_verbose("Godot Instance: embedded extension loaded successfully.");
+		return true;
+	}
+	print_verbose("Godot Instance: embedded extension failed to load.");
+	return false;
 }
 
 bool GodotInstance::start() {
 	print_verbose("GodotInstance::start()");
+	ERR_FAIL_COND_V_MSG(start_attempted, false, "GodotInstance may only be started once.");
+	start_attempted = true;
+
 	Error err = Main::setup2();
 	if (err != OK) {
 		return false;
 	}
 	started = Main::start() == EXIT_SUCCESS;
 	if (started) {
-		OS::get_singleton()->get_main_loop()->initialize();
+		if (OS::get_singleton()->get_main_loop()) {
+			OS::get_singleton()->get_main_loop()->initialize();
+		}
+		// 2dog: register hidden windows as additional outputs so display servers keep presenting.
+		if (OS::get_singleton()->is_hidden_window() && DisplayServer::get_singleton()) {
+			DisplayServer::get_singleton()->register_additional_output(this);
+		}
 	}
 	return started;
 }
@@ -79,14 +91,31 @@ bool GodotInstance::is_started() {
 }
 
 bool GodotInstance::iteration() {
+	return _iteration(-1.0);
+}
+
+bool GodotInstance::iteration_with_delta(double p_delta_seconds) {
+	ERR_FAIL_COND_V_MSG(!Math::is_finite(p_delta_seconds) || p_delta_seconds < 0.0, true, "Iteration delta must be finite and nonnegative.");
+	return _iteration(p_delta_seconds);
+}
+
+bool GodotInstance::_iteration(double p_delta_seconds) {
+	ERR_FAIL_COND_V_MSG(!started, true, "GodotInstance must be started before iteration.");
+
 	DisplayServer::get_singleton()->process_events();
-	return Main::iteration();
+	return Main::iteration(p_delta_seconds);
 }
 
 void GodotInstance::stop() {
 	print_verbose("GodotInstance::stop()");
 	if (started) {
-		OS::get_singleton()->get_main_loop()->finalize();
+		// 2dog: paired with the --hidden-window registration in start().
+		if (OS::get_singleton()->is_hidden_window() && DisplayServer::get_singleton()) {
+			DisplayServer::get_singleton()->unregister_additional_output(this);
+		}
+		if (OS::get_singleton()->get_main_loop()) {
+			OS::get_singleton()->get_main_loop()->finalize();
+		}
 	}
 	started = false;
 }

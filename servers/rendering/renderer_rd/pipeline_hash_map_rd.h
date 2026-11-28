@@ -39,6 +39,9 @@
 #include "core/templates/rid.h"
 #include "core/templates/vector.h"
 #include "servers/rendering/rendering_device.h"
+#ifdef WEB_ENABLED
+#include "servers/rendering/rendering_server_globals.h"
+#endif
 #include "servers/rendering/rendering_server_enums.h"
 
 #define PRINT_PIPELINE_COMPILATION_KEYS 0
@@ -65,6 +68,11 @@ private:
 			MutexLock lock(compiled_queue_mutex);
 			for (const Pair<uint32_t, RID> &pair : compiled_queue) {
 				hash_map[pair.first] = pair.second;
+#ifdef WEB_ENABLED
+				if (pair.second.is_valid()) {
+					pending_ready.insert(pair.first);
+				}
+#endif
 				hashes_added.push_back(pair.first);
 			}
 
@@ -83,6 +91,42 @@ private:
 
 		return !hashes_added.is_empty();
 	}
+
+#ifdef WEB_ENABLED
+	uint64_t last_added_frame = UINT64_MAX;
+	RBSet<uint32_t> pending_ready;
+
+	// Makes pipelines requested in earlier frames visible, once per frame: the browser has then received all of a
+	// frame's requests before the first is bound, and compiles them in parallel.
+	void _add_new_pipelines_once_per_frame() {
+		const uint64_t frame = RD::get_singleton()->get_frames_drawn();
+		if (frame == last_added_frame) {
+			return;
+		}
+		last_added_frame = frame;
+
+		thread_local LocalVector<uint32_t> finished;
+		finished.clear();
+		{
+			MutexLock local_lock(local_mutex);
+			for (const KeyValue<uint32_t, WorkerThreadPool::TaskID> &task : compilation_tasks) {
+				if (WorkerThreadPool::get_singleton()->is_task_completed(task.value)) {
+					finished.push_back(task.key);
+				}
+			}
+		}
+		_add_new_pipelines_to_map();
+
+		// A finished task that added nothing failed. Store an empty RID so its draws don't count as skipped forever.
+		MutexLock local_lock(local_mutex);
+		for (uint32_t hash : finished) {
+			if (!hash_map.has(hash)) {
+				hash_map[hash] = RID();
+				compilation_tasks.erase(hash);
+			}
+		}
+	}
+#endif
 
 	void _wait_for_all_pipelines() {
 		thread_local LocalVector<WorkerThreadPool::TaskID> tasks_to_wait;
@@ -109,6 +153,12 @@ public:
 	// Start compilation of a pipeline ahead of time in the background. Returns true if the compilation was started, false if it wasn't required. Source is only used for collecting statistics.
 	void compile_pipeline(const Key &p_key, uint32_t p_key_hash, RSE::PipelineSource p_source, bool p_high_priority) {
 		DEV_ASSERT((creation_object != nullptr) && (creation_function != nullptr) && "Creation object and function was not set before attempting to compile a pipeline.");
+#ifdef WEB_ENABLED
+		// Never bound on web, see get_pipeline. Compiling them would only keep the browser busy.
+		if (p_key.ubershader) {
+			return;
+		}
+#endif
 
 		MutexLock local_lock(local_mutex);
 		if (compilation_set.has(p_key_hash)) {
@@ -177,13 +227,30 @@ public:
 
 	// Retrieve a pipeline. It'll return an empty pipeline if it's not available yet, but it'll be guaranteed to succeed if 'wait for compilation' is true and stall as necessary. Source is just an optional number to aid debugging.
 	RID get_pipeline(const Key &p_key, uint32_t p_key_hash, bool p_wait_for_compilation, RSE::PipelineSource p_source) {
+#ifdef WEB_ENABLED
+		// On web a scene draw is skipped in the frame that first requests its pipeline, instead of waiting for it or
+		// binding an ubershader, which the browser would have to compile as well. Only 2D waits.
+		if (p_key.ubershader) {
+			return RID();
+		}
+		p_wait_for_compilation = p_source == RSE::PIPELINE_SOURCE_CANVAS;
+#endif
 		RBMap<uint32_t, RID>::Element *e = hash_map.find(p_key_hash);
 
 		if (e == nullptr) {
 			// Check if there's any new pipelines that need to be added and try again. This method triggers a mutex lock.
+#ifdef WEB_ENABLED
+			if (p_wait_for_compilation) {
+				_add_new_pipelines_to_map();
+			} else {
+				_add_new_pipelines_once_per_frame();
+			}
+			e = hash_map.find(p_key_hash);
+#else
 			if (_add_new_pipelines_to_map()) {
 				e = hash_map.find(p_key_hash);
 			}
+#endif
 		}
 
 		if (e == nullptr) {
@@ -203,9 +270,21 @@ public:
 					return RID();
 				}
 			} else {
+#ifdef WEB_ENABLED
+				RSG::pipeline_skipped_draws++;
+#endif
 				return RID();
 			}
 		} else {
+#ifdef WEB_ENABLED
+			if (!p_wait_for_compilation && !pending_ready.is_empty() && pending_ready.has(p_key_hash)) {
+				if (!RD::get_singleton()->render_pipeline_is_ready(e->value())) {
+					RSG::pipeline_skipped_draws++;
+					return RID();
+				}
+				pending_ready.erase(p_key_hash);
+			}
+#endif
 			return e->value();
 		}
 	}
@@ -221,6 +300,9 @@ public:
 
 		hash_map.clear();
 		compilation_set.clear();
+#ifdef WEB_ENABLED
+		pending_ready.clear();
+#endif
 	}
 
 	// Set the external pipeline compilations array to increase the counters on every time a pipeline is compiled.

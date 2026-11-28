@@ -89,7 +89,7 @@ def get_doc_path():
 def get_flags():
     return {
         "arch": detect_arch(),
-        "supported": ["library", "mono"],
+        "supported": ["webgpu", "library", "mono"],
     }
 
 
@@ -215,8 +215,16 @@ def configure(env: "SConsEnvironment"):
     if env["debug_symbols"]:
         env.Append(LINKFLAGS=["-Wl,--build-id"])
 
+    if env["library_type"] == "static_library":
+        env["OBJCOPY"] = "llvm-objcopy" if env["use_llvm"] else "objcopy"
+
     if env["library_type"] == "shared_library":
         env.Append(CCFLAGS=["-fPIC"])
+        # 2dog: GCC emits STB_GNU_UNIQUE for static locals in inline/template functions; glibc dedupes
+        # those process-wide across dlopen'd copies, breaking per-module isolation for
+        # multi-instance hosting (and pinning the library against dlclose).
+        if not env["use_llvm"]:
+            env.Append(CCFLAGS=["-fno-gnu-unique"])
 
     # LTO
 
@@ -237,7 +245,11 @@ def configure(env: "SConsEnvironment"):
             env.Append(CCFLAGS=["-flto"])
             env.Append(LINKFLAGS=["-flto"])
 
-        if not env["use_llvm"]:
+    if env["lto"] != "none" or env["library_type"] == "static_library":
+        if env["use_llvm"]:
+            env["RANLIB"] = "llvm-ranlib"
+            env["AR"] = "llvm-ar"
+        else:
             env["RANLIB"] = "gcc-ranlib"
             env["AR"] = "gcc-ar"
 
@@ -584,3 +596,8 @@ def configure(env: "SConsEnvironment"):
     else:
         if env["use_llvm"] and platform.system() != "FreeBSD":
             env.Append(LIBS=["atomic"])
+
+    # Optional native Dawn WebGPU backend.
+    from drivers.webgpu.native_config import configure_native_webgpu
+
+    configure_native_webgpu(env)

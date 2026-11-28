@@ -54,6 +54,12 @@ using namespace RendererSceneRenderImplementation;
 
 #define FADE_ALPHA_PASS_THRESHOLD 0.999
 
+void RenderForwardClustered::RenderBufferDataForwardClustered::get_msaa_texture_formats(Vector<RD::DataFormat> &r_formats) const {
+	r_formats.push_back(get_specular_format());
+	r_formats.push_back(get_normal_roughness_format());
+	r_formats.push_back(get_voxelgi_format());
+}
+
 void RenderForwardClustered::RenderBufferDataForwardClustered::ensure_specular() {
 	ERR_FAIL_NULL(render_buffers);
 
@@ -434,8 +440,14 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 		pipeline_specialization.material_feedback = p_params->use_material_feedback && surf->material->material_feedback_rid.is_valid();
 
 		if constexpr (p_pass_mode == PASS_MODE_COLOR) {
+#ifdef WEB_ENABLED
+			// Always on: toggling soft shadows or projectors per-object compiles duplicate pipelines mid-game.
+			pipeline_specialization.use_light_soft_shadows = true;
+			pipeline_specialization.use_light_projector = true;
+#else
 			pipeline_specialization.use_light_soft_shadows = element_info.uses_softshadow;
 			pipeline_specialization.use_light_projector = element_info.uses_projector;
+#endif
 			pipeline_specialization.use_directional_soft_shadows = p_params->use_directional_soft_shadow;
 			pipeline_specialization.use_lightmap_specular = element_info.uses_lightmap_specular;
 		}
@@ -929,7 +941,7 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 	}
 
 	if (p_update_buffer && element_total > 0u) {
-		RenderingDevice::get_singleton()->buffer_flush(scene_state.instance_buffer[p_render_list]._get(0u));
+		RenderingDevice::get_singleton()->buffer_flush(scene_state.instance_buffer[p_render_list]._get(0u), p_offset * sizeof(SceneState::InstanceData), element_total * sizeof(SceneState::InstanceData));
 	}
 }
 
@@ -1228,7 +1240,7 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 }
 
 void RenderForwardClustered::_setup_voxelgis(const PagedArray<RID> &p_voxelgis) {
-	scene_state.voxelgis_used = MIN(p_voxelgis.size(), uint32_t(MAX_VOXEL_GI_INSTANCESS));
+	scene_state.voxelgis_used = MIN(p_voxelgis.size(), scene_state.max_voxel_gi_instances);
 	for (uint32_t i = 0; i < scene_state.voxelgis_used; i++) {
 		scene_state.voxelgi_ids[i] = p_voxelgis[i];
 	}
@@ -1918,6 +1930,15 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_voxelgi = false;
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
 	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
+	if (using_ssil && RD::get_singleton()->get_driver_workarounds().limited_read_write_storage_8bit) {
+		WARN_PRINT_ONCE("SSIL is unavailable on this platform, which lacks read-write storage for R8 textures. Disabling SSIL.");
+		using_ssil = false;
+	}
+	if (!gi.is_voxel_gi_supported() && p_render_data->voxel_gi_instances->size() > 0) {
+		WARN_PRINT_ONCE("VoxelGI is unavailable on this platform, which lacks read-write storage for RGBA8, RGBA16 and RGBA32 textures. Ignoring VoxelGI nodes.");
+		p_render_data->voxel_gi_instances = &no_voxel_gi_instances;
+		p_render_data->voxel_gi_count = 0;
+	}
 	bool using_motion_pass = rb_data.is_valid() && using_upscaling;
 
 	if (is_reflection_probe) {
@@ -2983,8 +3004,8 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 
 void RenderForwardClustered::_render_shadow_process() {
 	RenderingDevice *rd = RenderingDevice::get_singleton();
-	if (scene_state.instance_buffer[RENDER_LIST_SECONDARY].get_size(0u) > 0u) {
-		rd->buffer_flush(scene_state.instance_buffer[RENDER_LIST_SECONDARY]._get(0u));
+	if (scene_state.instance_buffer[RENDER_LIST_SECONDARY].get_size(0u) > 0u && render_list[RENDER_LIST_SECONDARY].elements.size() > 0u) {
+		rd->buffer_flush(scene_state.instance_buffer[RENDER_LIST_SECONDARY]._get(0u), 0, render_list[RENDER_LIST_SECONDARY].elements.size() * sizeof(SceneState::InstanceData));
 	}
 
 	//render shadows one after the other, so this can be done un-barriered and the driver can optimize (as well as allow us to run compute at the same time)
@@ -3346,7 +3367,7 @@ void RenderForwardClustered::_update_render_base_uniform_set() {
 		{
 			RD::Uniform u;
 			u.binding = 8;
-			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.uniform_type = scene_state.lightmap_uniform_buffer ? RD::UNIFORM_TYPE_UNIFORM_BUFFER : RD::UNIFORM_TYPE_STORAGE_BUFFER;
 			u.append_id(scene_state.lightmap_buffer);
 			uniforms.push_back(u);
 		}
@@ -3616,7 +3637,7 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		u.binding = 8;
 		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 		RID default_tex = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_3D_WHITE);
-		for (int i = 0; i < MAX_VOXEL_GI_INSTANCESS; i++) {
+		for (int i = 0; i < (int)scene_state.max_voxel_gi_instances; i++) {
 			if (p_render_data && i < (int)p_render_data->voxel_gi_instances->size()) {
 				RID tex = gi.voxel_gi_instance_get_texture((*p_render_data->voxel_gi_instances)[i]);
 				if (!tex.is_valid()) {
@@ -3988,7 +4009,7 @@ RID RenderForwardClustered::_setup_sdfgi_render_pass_uniform_set(RID p_albedo_te
 		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 
 		RID default_tex = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_3D_WHITE);
-		for (int i = 0; i < MAX_VOXEL_GI_INSTANCESS; i++) {
+		for (int i = 0; i < (int)scene_state.max_voxel_gi_instances; i++) {
 			u.append_id(default_tex);
 		}
 
@@ -4091,7 +4112,7 @@ RID RenderForwardClustered::_setup_sdfgi_render_pass_uniform_set(RID p_albedo_te
 	}
 	{
 		RD::Uniform u;
-		u.uniform_type = RD::UNIFORM_TYPE_IMAGE;
+		u.uniform_type = RD::get_singleton()->get_device_api_name() == "WebGPU" ? RD::UNIFORM_TYPE_STORAGE_BUFFER : RD::UNIFORM_TYPE_IMAGE;
 		u.binding = 27;
 		u.append_id(p_geom_facing_texture);
 		uniforms.push_back(u);
@@ -4169,6 +4190,10 @@ void RenderForwardClustered::sdfgi_update(const Ref<RenderSceneBuffers> &p_rende
 	}
 
 	bool needs_sdfgi = p_environment.is_valid() && environment_get_sdfgi_enabled(p_environment);
+	if (needs_sdfgi && !gi.is_sdfgi_supported()) {
+		WARN_PRINT_ONCE("SDFGI is unavailable on this platform, which lacks read-write storage for RGBA8, RGBA16 and RGBA32 textures. Disabling SDFGI.");
+		needs_sdfgi = false;
+	}
 	bool needs_reset = sdfgi.is_valid() ? sdfgi->version != gi.sdfgi_current_version : false;
 
 	if (!needs_sdfgi || needs_reset) {
@@ -4284,7 +4309,15 @@ void RenderForwardClustered::_update_global_pipeline_data_requirements_from_proj
 	const bool positional_shadow_16_bits = GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/positional_shadow/atlas_16_bits");
 	global_pipeline_data_required.use_16_bit_shadows = directional_shadow_16_bits || positional_shadow_16_bits;
 	global_pipeline_data_required.use_32_bit_shadows = !directional_shadow_16_bits || !positional_shadow_16_bits;
-	global_pipeline_data_required.texture_samples = RenderSceneBuffersRD::msaa_to_samples(RenderSceneBuffersRD::get_nearest_supported_msaa_3d(RSE::ViewportMSAA(msaa_3d_mode), _render_buffers_can_be_storage()));
+	const RD::DataFormat formats[] = {
+		_render_buffers_get_preferred_color_format(),
+		RenderSceneBuffersRD::get_depth_format(false, true, true),
+		RenderSceneBuffersRD::get_velocity_format(),
+		RenderBufferDataForwardClustered::get_specular_format(),
+		RenderBufferDataForwardClustered::get_normal_roughness_format(),
+		RenderBufferDataForwardClustered::get_voxelgi_format(),
+	};
+	global_pipeline_data_required.texture_samples = RenderSceneBuffersRD::msaa_to_samples(RenderSceneBuffersRD::get_supported_msaa(RSE::ViewportMSAA(msaa_3d_mode), { formats, std_size(formats) }));
 }
 
 void RenderForwardClustered::_update_global_pipeline_data_requirements_from_light_storage() {
@@ -4906,8 +4939,11 @@ void RenderForwardClustered::_mesh_compile_pipelines_for_surface(const SurfacePi
 	if (p_global.use_sdfgi) {
 		// Depth pass with SDFGI support.
 		pipeline_key.version = SceneShaderForwardClustered::PIPELINE_VERSION_DEPTH_PASS_WITH_SDF;
-		pipeline_key.framebuffer_format_id = _get_depth_framebuffer_format_for_pipeline(buffers_can_be_storage, RD::TextureSamples(p_global.texture_samples), false, false);
-		_mesh_compile_pipeline_for_surface(p_surface.shader, p_surface.mesh_surface, true, p_surface.instanced, p_source, pipeline_key, r_pipeline_pairs);
+		// Its single-attachment blend state needs the empty framebuffer's real attachment.
+		if (RD::get_singleton()->has_feature(RD::SUPPORTS_FRAGMENT_SHADER_WITH_ONLY_SIDE_EFFECTS)) {
+			pipeline_key.framebuffer_format_id = _get_depth_framebuffer_format_for_pipeline(buffers_can_be_storage, RD::TextureSamples(p_global.texture_samples), false, false);
+			_mesh_compile_pipeline_for_surface(p_surface.shader, p_surface.mesh_surface, true, p_surface.instanced, p_source, pipeline_key, r_pipeline_pairs);
+		}
 
 		// Depth pass with SDFGI support for an empty framebuffer.
 		pipeline_key.framebuffer_format_id = RD::get_singleton()->framebuffer_format_create_empty();
@@ -5184,6 +5220,10 @@ void RenderForwardClustered::enable_features(BitField<FeatureBits> p_feature_bit
 	if (p_feature_bits.has_flag(FEATURE_VRS_BIT)) {
 		gi.enable_vrs_shader_group();
 	}
+
+	if (p_feature_bits.has_flag(FEATURE_NO_IMAGE_ATOMICS_BIT)) {
+		RendererRD::Fog::get_singleton()->enable_no_atomics_shader_groups();
+	}
 }
 
 String RenderForwardClustered::get_name() const {
@@ -5191,6 +5231,9 @@ String RenderForwardClustered::get_name() const {
 }
 
 void RenderForwardClustered::GeometryInstanceForwardClustered::pair_voxel_gi_instances(const RID *p_voxel_gi_instances, uint32_t p_voxel_gi_instance_count) {
+	if (!RenderForwardClustered::get_singleton()->gi.is_voxel_gi_supported()) {
+		p_voxel_gi_instance_count = 0; // The probes are never rendered; see _render_scene().
+	}
 	if (p_voxel_gi_instance_count > 0) {
 		voxel_gi_instances[0] = p_voxel_gi_instances[0];
 	} else {
@@ -5274,14 +5317,25 @@ RenderForwardClustered::RenderForwardClustered() {
 		}
 #endif
 
+		// Compact bindings keep the scene shader within browser WebGPU limits: Safari exposes 44 sampled textures per
+		// stage and Chrome on Metal 10 storage buffers. Halving the lightmap textures and binding two VoxelGIs frees 14
+		// sampled textures; a lightmap uniform buffer frees one storage buffer. The shader derives the slot counts from
+		// RENDER_DRIVER_WEBGPU, so the general defines stay identical and a bake from any host editor matches.
+		const bool compact_bindings = RD::get_singleton()->get_driver_workarounds().compact_scene_bindings;
 		{
 			//lightmaps
-			scene_state.max_lightmaps = MAX_LIGHTMAPS;
-			defines += "\n#define MAX_LIGHTMAP_TEXTURES " + itos(scene_state.max_lightmaps) + "\n";
-			defines += "\n#define MAX_LIGHTMAPS " + itos(scene_state.max_lightmaps) + "\n";
+			scene_state.max_lightmaps = compact_bindings ? MAX_LIGHTMAPS / 2 : MAX_LIGHTMAPS;
+			defines += "\n#define MAX_LIGHTMAP_TEXTURES " + itos(MAX_LIGHTMAPS) + "\n";
+			defines += "\n#define MAX_LIGHTMAPS " + itos(MAX_LIGHTMAPS) + "\n";
 
-			scene_state.lightmap_buffer = RD::get_singleton()->storage_buffer_create(sizeof(LightmapData) * scene_state.max_lightmaps);
+			scene_state.lightmap_uniform_buffer = compact_bindings;
+			if (scene_state.lightmap_uniform_buffer) {
+				scene_state.lightmap_buffer = RD::get_singleton()->uniform_buffer_create(sizeof(LightmapData) * MAX_LIGHTMAPS);
+			} else {
+				scene_state.lightmap_buffer = RD::get_singleton()->storage_buffer_create(sizeof(LightmapData) * MAX_LIGHTMAPS);
+			}
 		}
+		scene_state.max_voxel_gi_instances = compact_bindings ? MAX_VOXEL_GI_INSTANCESS_PER_INSTANCE : MAX_VOXEL_GI_INSTANCESS;
 		{
 			//captures
 			scene_state.max_lightmap_captures = 2048;
@@ -5460,4 +5514,5 @@ RenderForwardClustered::~RenderForwardClustered() {
 		RD::get_singleton()->free_rid(sdfgi_framebuffer_size_cache.begin()->value);
 		sdfgi_framebuffer_size_cache.remove(sdfgi_framebuffer_size_cache.begin());
 	}
+	singleton = nullptr;
 }

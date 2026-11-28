@@ -1101,7 +1101,7 @@ AnimationNodeStateMachinePlayback::NextInfo AnimationNodeStateMachinePlayback::_
 			if (ref_transition->get_advance_mode() == AnimationNodeStateMachineTransition::ADVANCE_MODE_DISABLED) {
 				continue;
 			}
-			if (p_state_machine->transitions[i].from == current && (_check_advance_condition(p_process_state, p_instance, anodesm, ref_transition) || bypass)) {
+			if (p_state_machine->transitions[i].from == current && (bypass || _check_advance_condition(p_process_state, p_instance, anodesm, ref_transition))) {
 				if (ref_transition->get_priority() <= priority_best) {
 					priority_best = ref_transition->get_priority();
 					auto_advance_to = i;
@@ -1132,10 +1132,17 @@ bool AnimationNodeStateMachinePlayback::_check_advance_condition(AnimationNode::
 
 	StringName advance_condition_name = transition->get_advance_condition_name();
 
-	ERR_FAIL_COND_V(advance_condition_name != StringName() && p_instance.resource != state_machine, false);
-
-	if (advance_condition_name != StringName() && !bool(p_instance.get_parameter(advance_condition_name))) {
-		return false;
+	if (advance_condition_name != StringName()) {
+		AnimationNodeInstance *condition_instance = &p_instance;
+		if (p_instance.resource != state_machine) {
+			// A grouped End transition uses its parent's condition.
+			const String parent_path = String(p_instance.path).trim_suffix("/").get_base_dir() + "/";
+			condition_instance = p_process_state.tree->get_node_instance_by_path_or_null(parent_path);
+			ERR_FAIL_COND_V(!condition_instance || condition_instance->resource != state_machine, false);
+		}
+		if (!bool(condition_instance->get_parameter(advance_condition_name))) {
+			return false;
+		}
 	}
 
 	if (transition->expression.is_valid()) {

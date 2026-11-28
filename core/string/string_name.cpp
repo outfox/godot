@@ -30,6 +30,7 @@
 
 #include "string_name.h"
 
+#include "core/core_globals.h"
 #include "core/os/mutex.h"
 #include "core/os/os.h"
 #include "core/string/print_string.h"
@@ -43,9 +44,17 @@ struct StringName::Table {
 	constexpr static uint32_t TABLE_MASK = TABLE_LEN - 1;
 
 	static _Data *table[TABLE_LEN];
-	static BinaryMutex mutex;
-	static PagedAllocator<_Data> allocator;
 	static bool configured;
+
+	// 2dog: retain the StringName lock and allocator across restarts and static destruction.
+	static BinaryMutex &mutex() {
+		static BinaryMutex *m = memnew(BinaryMutex);
+		return *m;
+	}
+	static PagedAllocator<_Data> &allocator() {
+		static PagedAllocator<_Data> *a = memnew(PagedAllocator<_Data>);
+		return *a;
+	}
 };
 
 // Defined out-of-class instead of using static inline so the compiler can
@@ -53,11 +62,13 @@ struct StringName::Table {
 // data section (.data). Because the zero-fill region is allocated at runtime,
 // this shrinks the binary size on disk.
 StringName::_Data *StringName::Table::table[TABLE_LEN];
-BinaryMutex StringName::Table::mutex;
-PagedAllocator<StringName::_Data> StringName::Table::allocator;
 bool StringName::Table::configured = false;
 
 void StringName::setup() {
+	if (CoreGlobals::engine_reinit_enabled && Table::configured) {
+		// 2dog: preserve interned names held by statics across engine restarts.
+		return;
+	}
 	ERR_FAIL_COND(Table::configured);
 	for (uint32_t i = 0; i < Table::TABLE_LEN; i++) {
 		Table::table[i] = nullptr;
@@ -66,7 +77,10 @@ void StringName::setup() {
 }
 
 void StringName::cleanup() {
-	MutexLock lock(Table::mutex);
+	if (CoreGlobals::engine_reinit_enabled) {
+		return;
+	}
+	MutexLock lock(Table::mutex());
 
 #ifdef DEBUG_ENABLED
 	if (unlikely(debug_stringname)) {
@@ -111,7 +125,7 @@ void StringName::cleanup() {
 			}
 
 			Table::table[i] = Table::table[i]->next;
-			Table::allocator.free(d);
+			Table::allocator().free(d);
 		}
 	}
 	if (lost_strings) {
@@ -129,9 +143,9 @@ void StringName::unref() {
 	}
 
 	if (_data && _data->refcount.unref()) {
-		MutexLock lock(Table::mutex);
+		MutexLock lock(Table::mutex());
 
-		if (CoreGlobals::leak_reporting_enabled && _data->static_count.get() > 0) {
+		if (CoreGlobals::leak_reporting_enabled && _data->static_count.get() > 0 && !CoreGlobals::engine_reinit_enabled) {
 			ERR_PRINT("BUG: Unreferenced static string to 0: " + _data->name);
 		}
 		if (_data->prev) {
@@ -144,7 +158,7 @@ void StringName::unref() {
 		if (_data->next) {
 			_data->next->prev = _data->prev;
 		}
-		Table::allocator.free(_data);
+		Table::allocator().free(_data);
 	}
 
 	_data = nullptr;
@@ -232,7 +246,7 @@ StringName::StringName(const char *p_name, bool p_static) {
 	const uint32_t hash = String::hash(p_name);
 	const uint32_t idx = hash & Table::TABLE_MASK;
 
-	MutexLock lock(Table::mutex);
+	MutexLock lock(Table::mutex());
 	_data = Table::table[idx];
 
 	while (_data) {
@@ -256,7 +270,7 @@ StringName::StringName(const char *p_name, bool p_static) {
 		return;
 	}
 
-	_data = Table::allocator.alloc();
+	_data = Table::allocator().alloc();
 	_data->name = p_name;
 	_data->refcount.init();
 	_data->static_count.set(p_static ? 1 : 0);
@@ -289,7 +303,7 @@ StringName::StringName(const String &p_name, bool p_static) {
 	const uint32_t hash = p_name.hash();
 	const uint32_t idx = hash & Table::TABLE_MASK;
 
-	MutexLock lock(Table::mutex);
+	MutexLock lock(Table::mutex());
 	_data = Table::table[idx];
 
 	while (_data) {
@@ -312,7 +326,7 @@ StringName::StringName(const String &p_name, bool p_static) {
 		return;
 	}
 
-	_data = Table::allocator.alloc();
+	_data = Table::allocator().alloc();
 	_data->name = p_name;
 	_data->refcount.init();
 	_data->static_count.set(p_static ? 1 : 0);

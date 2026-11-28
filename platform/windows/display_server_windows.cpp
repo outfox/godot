@@ -28,8 +28,11 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "display_server_windows.h"
+#ifdef WEBGPU_ENABLED
+#include "drivers/webgpu/rendering_context_driver_webgpu.h"
+#endif
 
+#include "display_server_windows.h"
 #include "drop_target_windows.h"
 #include "key_mapping_windows.h"
 #include "native_menu_windows.h"
@@ -263,6 +266,11 @@ Vector2i DisplayServerWindows::_get_screen_expand_offset(int p_screen) const {
 }
 
 void DisplayServerWindows::_set_mouse_mode_impl(DisplayServerEnums::MouseMode p_mode) {
+	// 2dog: an off-screen host owns the OS pointer; keep only Godot's logical mode.
+	if (OS::get_singleton()->is_hidden_window()) {
+		return;
+	}
+
 	if (p_mode == DisplayServerEnums::MOUSE_MODE_HIDDEN || p_mode == DisplayServerEnums::MOUSE_MODE_CAPTURED || p_mode == DisplayServerEnums::MOUSE_MODE_CONFINED_HIDDEN) {
 		// Hide cursor before moving.
 		if (hCursor == nullptr) {
@@ -2368,9 +2376,14 @@ void DisplayServerWindows::window_set_current_screen(int p_screen, DisplayServer
 		Size2 size = screen_get_size(p_screen);
 		Vector2i off = (wd.multiwindow_fs || (!wd.fullscreen && wd.borderless && wd.maximized)) ? _get_screen_expand_offset(p_screen) : Vector2i();
 
-		ShowWindow(wd.hWnd, SW_RESTORE);
+		const bool keep_hidden = p_window == DisplayServerEnums::MAIN_WINDOW_ID && OS::get_singleton()->is_hidden_window(); // 2dog
+		if (!keep_hidden) {
+			ShowWindow(wd.hWnd, SW_RESTORE);
+		}
 		MoveWindow(wd.hWnd, pos.x, pos.y, size.width + off.x, size.height + off.y, TRUE);
-		ShowWindow(wd.hWnd, SW_MAXIMIZE);
+		if (!keep_hidden) {
+			ShowWindow(wd.hWnd, SW_MAXIMIZE);
+		}
 	} else {
 		Rect2i srect = screen_get_usable_rect(p_screen);
 		Point2i wpos = window_get_position(p_window) - screen_get_position(window_get_current_screen(p_window));
@@ -2785,6 +2798,14 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 		return;
 	}
 
+	// 2dog: --hidden-window keeps the main window hidden; only the stored mode state changes.
+	const bool keep_hidden = p_window == DisplayServerEnums::MAIN_WINDOW_ID && OS::get_singleton()->is_hidden_window();
+	auto show_window_cmd = [&](int p_cmd) {
+		if (!keep_hidden) {
+			ShowWindow(wd.hWnd, p_cmd);
+		}
+	};
+
 	bool was_fullscreen = wd.fullscreen;
 	wd.was_fullscreen_pre_min = false;
 
@@ -2828,7 +2849,7 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 			rect.bottom += GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CYCAPTION);
 		}
 
-		ShowWindow(wd.hWnd, SW_RESTORE);
+		show_window_cmd(SW_RESTORE);
 		MoveWindow(wd.hWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, TRUE);
 
 		if (restore_mouse_trails > 1) {
@@ -2848,18 +2869,18 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 			rect.bottom = wd.height;
 		}
 
-		ShowWindow(wd.hWnd, SW_RESTORE);
+		show_window_cmd(SW_RESTORE);
 		MoveWindow(wd.hWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, TRUE);
 	}
 
 	if (p_mode == DisplayServerEnums::WINDOW_MODE_WINDOWED) {
-		ShowWindow(wd.hWnd, SW_NORMAL);
+		show_window_cmd(SW_NORMAL);
 		wd.maximized = false;
 		wd.minimized = false;
 	}
 
 	if (p_mode == DisplayServerEnums::WINDOW_MODE_MAXIMIZED && !wd.borderless) {
-		ShowWindow(wd.hWnd, SW_MAXIMIZE);
+		show_window_cmd(SW_MAXIMIZE);
 		wd.maximized = true;
 		wd.minimized = false;
 	}
@@ -2870,7 +2891,7 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 			GetWindowRect(wd.hWnd, &wd.pre_fs_rect);
 			wd.pre_fs_valid = true;
 		}
-		ShowWindow(wd.hWnd, SW_NORMAL);
+		show_window_cmd(SW_NORMAL);
 		wd.maximized = true;
 		wd.minimized = false;
 
@@ -2882,7 +2903,7 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 	}
 
 	if (p_mode == DisplayServerEnums::WINDOW_MODE_MINIMIZED) {
-		ShowWindow(wd.hWnd, SW_MINIMIZE);
+		show_window_cmd(SW_MINIMIZE);
 		wd.maximized = false;
 		wd.minimized = true;
 		wd.was_fullscreen_pre_min = was_fullscreen;
@@ -2897,7 +2918,7 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 
 	if ((p_mode == DisplayServerEnums::WINDOW_MODE_FULLSCREEN || p_mode == DisplayServerEnums::WINDOW_MODE_EXCLUSIVE_FULLSCREEN) && !wd.fullscreen) {
 		if (wd.minimized || wd.maximized) {
-			ShowWindow(wd.hWnd, SW_RESTORE);
+			show_window_cmd(SW_RESTORE);
 		}
 
 		// Save previous maximized stare.
@@ -2992,7 +3013,9 @@ void DisplayServerWindows::window_set_flag(DisplayServerEnums::WindowFlags p_fla
 			}
 			_update_window_mouse_passthrough(p_window);
 			_update_window_style(p_window);
-			ShowWindow(wd.hWnd, (wd.no_focus || wd.is_popup) ? SW_SHOWNOACTIVATE : SW_SHOW); // Show the window.
+			if (p_window != DisplayServerEnums::MAIN_WINDOW_ID || !OS::get_singleton()->is_hidden_window()) { // 2dog: stay hidden.
+				ShowWindow(wd.hWnd, (wd.no_focus || wd.is_popup) ? SW_SHOWNOACTIVATE : SW_SHOW); // Show the window.
+			}
 		} break;
 		case DisplayServerEnums::WINDOW_FLAG_ALWAYS_ON_TOP: {
 			ERR_FAIL_COND_MSG(wd.transient_parent != DisplayServerEnums::INVALID_WINDOW_ID && p_enabled, "Transient windows can't become on top.");
@@ -3352,7 +3375,7 @@ void DisplayServerWindows::window_set_ime_active(const bool p_active, DisplaySer
 		wd.ime_active = true;
 		ImmAssociateContext(wd.hWnd, wd.im_himc);
 		CreateCaret(wd.hWnd, nullptr, 1, 1);
-		window_set_ime_position(wd.im_position, p_window);
+		window_set_ime_position(wd.im_position, window_id);
 	} else {
 		ImmAssociateContext(wd.hWnd, (HIMC) nullptr);
 		DestroyCaret();
@@ -3438,7 +3461,8 @@ void DisplayServerWindows::cursor_set_shape(DisplayServerEnums::CursorShape p_sh
 	if (cursors_cache.has(p_shape)) {
 		SetCursor(cursors[p_shape]);
 	} else {
-		SetCursor(LoadCursor(hInstance, win_cursors[p_shape]));
+		// 2dog: predefined IDC_* cursors require a null module handle in embedded hosts.
+		SetCursor(LoadCursor(nullptr, win_cursors[p_shape]));
 	}
 
 	cursor_shape = p_shape;
@@ -4421,6 +4445,10 @@ Vector2 DisplayServerWindows::_get_raw_mouse_motion(const RAWINPUT &p_raw, Displ
 }
 
 void DisplayServerWindows::_process_raw_mouse_motion(const Vector2 &p_relative, bool p_left_button_down, DisplayServerEnums::WindowID p_window_id) {
+	if (OS::get_singleton()->is_hidden_window()) {
+		return;
+	}
+
 	if (p_relative == Vector2()) {
 		return;
 	}
@@ -4584,6 +4612,14 @@ void DisplayServerWindows::process_events() {
 
 	_THREAD_SAFE_LOCK_
 
+	MSG msg = {};
+	// 2dog: remove and dispatch one unfiltered message before the throttled pump.
+	// A PM_NOREMOVE peek followed only by filtered retrieval can leave taskbar
+	// activation stuck after minimizing, even though the main loop keeps running.
+	if (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+		TranslateMessage(&msg);
+		DispatchMessageW(&msg);
+	}
 	bool has_touch_events = true;
 	if (!disable_bulk_raw_input) {
 		has_touch_events = process_raw_input();
@@ -4595,14 +4631,15 @@ void DisplayServerWindows::process_events() {
 	// The pump throttles only what the hardware can flood, and drains the rest.
 	// See <https://ph3at.github.io/posts/Windows-Input/> for more information.
 	//
-	// - WM_INPUT is never dispatched from here: pulling raw input through
+	// - After the initial unfiltered retrieval, WM_INPUT stays queued: pulling it through
 	//   PeekMessage() one message at a time is what collapses the pump at high
 	//   polling rates (2,000 Hz and above). It stays in the queue for the next
 	//   buffered read in process_raw_input().
 	// - WM_MOUSEMOVE and WM_NCMOUSEMOVE are synthesized on demand from the
 	//   hardware input stream, so while the mouse is moving, the queue never
 	//   reads empty and an unbounded pump spins until the mouse stops. They are
-	//   dispatched at most once per frame each. No motion is lost: they carry
+	//   dispatched at most once per frame each by the filtered pump, in addition
+	//   to any initial unfiltered message. No motion is lost: they carry
 	//   the latest (coalesced) cursor position, and the relative motion derived
 	//   from successive positions preserves the total delta. Captured mouse
 	//   mode gets its sub-frame motion from raw input.
@@ -4611,7 +4648,6 @@ void DisplayServerWindows::process_events() {
 	//   would split the WM_CHAR posted by TranslateMessage() from its
 	//   WM_KEYDOWN across frames, which breaks the pairing logic in
 	//   _process_key_events() and makes keys fire twice.
-	MSG msg = {};
 	auto peek_discrete = [&] {
 		BOOL ret = PeekMessageW(&msg, nullptr, 0, WM_NCMOUSEMOVE - 1, PM_REMOVE);
 		if (!ret) {
@@ -6039,11 +6075,9 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			}
 
 			// The bulk of raw input is drained in batch by process_raw_input()
-			// before the message pump runs. This only sees WM_INPUT messages the
-			// pump picks up afterwards (it peeks the full message range whenever
-			// the app is not focused, and raw input can also arrive while the pump
-			// itself is running). Without this fallback, DefWindowProc() would
-			// free their data unread.
+			// before the filtered message pump runs. The initial unfiltered
+			// retrieval can dispatch WM_INPUT before that batch is read. Without
+			// this fallback, DefWindowProc() would free its data unread.
 			UINT dwSize;
 			if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, nullptr, &dwSize, sizeof(RAWINPUTHEADER)) != 0 || dwSize == 0) {
 				break;
@@ -7683,7 +7717,17 @@ Error DisplayServerWindows::_create_rendering_context_window(DisplayServerEnums:
 #ifdef D3D12_ENABLED
 		RenderingContextDriverD3D12::WindowPlatformData d3d12;
 #endif
+#ifdef WEBGPU_ENABLED
+		RenderingContextDriverWebGPU::WindowPlatformData webgpu;
+#endif
 	} wpd;
+#ifdef WEBGPU_ENABLED
+	if (p_rendering_driver == "webgpu") {
+		wpd.webgpu.kind = RenderingContextDriverWebGPU::WindowPlatformData::KIND_WIN32;
+		wpd.webgpu.display = hInstance;
+		wpd.webgpu.window = wd.hWnd;
+	}
+#endif
 #ifdef VULKAN_ENABLED
 	if (p_rendering_driver == "vulkan") {
 		wpd.vulkan.window = wd.hWnd;
@@ -8161,9 +8205,14 @@ DisplayServerWindows::DisplayServerWindows(const String &p_rendering_driver, Dis
 	wc.lpszMenuName = nullptr;
 	wc.lpszClassName = L"Engine";
 
+	// 2dog: retain the class across restarts; unregistering leaves dangling TSF/CoreMessaging state.
 	if (!RegisterClassExW(&wc)) {
-		r_error = ERR_UNAVAILABLE;
-		return;
+		WNDCLASSEXW existing = {};
+		existing.cbSize = sizeof(WNDCLASSEXW);
+		if (GetLastError() != ERROR_CLASS_ALREADY_EXISTS || !GetClassInfoExW(wc.hInstance, wc.lpszClassName, &existing) || existing.lpfnWndProc != wc.lpfnWndProc) {
+			r_error = ERR_UNAVAILABLE;
+			return;
+		}
 	}
 
 	disable_bulk_raw_input = GLOBAL_GET("input_devices/compatibility/windows/disable_raw_event_bulk_processing");
@@ -8238,7 +8287,9 @@ DisplayServerWindows::DisplayServerWindows(const String &p_rendering_driver, Dis
 	String rendering_drivers[2];
 	uint32_t rendering_driver_count = 0;
 
-	if (rendering_driver == "d3d12") {
+	if (rendering_driver == "webgpu") {
+		rendering_drivers[rendering_driver_count++] = rendering_driver;
+	} else if (rendering_driver == "d3d12") {
 		rendering_drivers[rendering_driver_count++] = rendering_driver;
 		if (fallback_to_vulkan) {
 			rendering_drivers[rendering_driver_count++] = "vulkan";
@@ -8255,6 +8306,12 @@ DisplayServerWindows::DisplayServerWindows(const String &p_rendering_driver, Dis
 
 	for (uint32_t i = 0; i < rendering_driver_count; i++) {
 		const String &tested_rendering_driver = rendering_drivers[i];
+#ifdef WEBGPU_ENABLED
+		if (tested_rendering_driver == "webgpu") {
+			rendering_context = memnew(RenderingContextDriverWebGPU);
+			tested_drivers.set_flag(DRIVER_ID_RD_WEBGPU);
+		}
+#endif
 
 #ifdef VULKAN_ENABLED
 		if (tested_rendering_driver == "vulkan") {
@@ -8594,7 +8651,6 @@ DisplayServerWindows::DisplayServerWindows(const String &p_rendering_driver, Dis
 
 Vector<String> DisplayServerWindows::get_rendering_drivers_func() {
 	Vector<String> drivers;
-
 #ifdef VULKAN_ENABLED
 	drivers.push_back("vulkan");
 #endif
@@ -8607,6 +8663,9 @@ Vector<String> DisplayServerWindows::get_rendering_drivers_func() {
 	drivers.push_back("opengl3_angle");
 #endif
 #endif
+#ifdef WEBGPU_ENABLED
+	drivers.push_back("webgpu");
+#endif
 	drivers.push_back("dummy");
 
 	return drivers;
@@ -8617,13 +8676,16 @@ DisplayServer *DisplayServerWindows::create_func(const String &p_rendering_drive
 	if (r_error != OK) {
 		if (tested_drivers == 0) {
 			OS::get_singleton()->alert("Failed to register the window class.", "Unable to initialize DisplayServer");
-		} else if (tested_drivers.has_flag(DRIVER_ID_RD_VULKAN) || tested_drivers.has_flag(DRIVER_ID_RD_D3D12)) {
+		} else if (tested_drivers.has_flag(DRIVER_ID_RD_VULKAN) || tested_drivers.has_flag(DRIVER_ID_RD_D3D12) || tested_drivers.has_flag(DRIVER_ID_RD_WEBGPU)) {
 			Vector<String> drivers;
 			if (tested_drivers.has_flag(DRIVER_ID_RD_VULKAN)) {
 				drivers.push_back("Vulkan");
 			}
 			if (tested_drivers.has_flag(DRIVER_ID_RD_D3D12)) {
 				drivers.push_back("Direct3D 12");
+			}
+			if (tested_drivers.has_flag(DRIVER_ID_RD_WEBGPU)) {
+				drivers.push_back("WebGPU");
 			}
 			String executable_name = OS::get_singleton()->get_executable_path().get_file();
 			OS::get_singleton()->alert(
@@ -8767,4 +8829,6 @@ DisplayServerWindows::~DisplayServerWindows() {
 	memdelete(tts);
 
 	OleUninitialize();
+
+	// 2dog: keep the window class registered to preserve TSF/CoreMessaging state.
 }

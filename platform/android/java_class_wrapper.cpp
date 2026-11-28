@@ -585,22 +585,23 @@ bool JavaClass::_set_field_value(JNIEnv *p_env, jobject p_instance, jclass p_cla
 }
 
 bool JavaClass::_get_field(jobject p_instance, const StringName &p_name, Variant &r_ret) const {
-	if (fields.has(p_name)) {
-		JavaClass::FieldInfo field_info = fields[p_name];
-		if (field_info._static && field_info._final && field_info._constant_value_initialized) {
-			r_ret = field_info.constant_value;
-			return true;
-		}
-
+	const FieldInfo *field_info = fields.getptr(p_name);
+	if (field_info) {
 		JNIEnv *env = get_jni_env();
 		ERR_FAIL_NULL_V(env, false);
-		bool result = _get_field_value(env, p_instance, _class, field_info, r_ret);
-		if (result && field_info._static && field_info._final) {
-			// We only get here if the static final value was not already initialized.
-			field_info.constant_value = r_ret;
-			field_info._constant_value_initialized = true;
+		// Java arrays can change and an object wrapper may hold this JavaClass alive.
+		if (field_info->_static && field_info->_final && (field_info->field_type & ~ARG_NUMBER_CLASS_BIT) <= ARG_TYPE_STRING) {
+			MutexLock lock(constant_values_mutex);
+			if (!field_info->_constant_value_initialized) {
+				if (!_get_field_value(env, p_instance, _class, *field_info, field_info->constant_value)) {
+					return false;
+				}
+				field_info->_constant_value_initialized = true;
+			}
+			r_ret = field_info->constant_value;
+			return true;
 		}
-		return result;
+		return _get_field_value(env, p_instance, _class, *field_info, r_ret);
 	}
 
 	// Check the parent class.
@@ -613,12 +614,10 @@ bool JavaClass::_get_field(jobject p_instance, const StringName &p_name, Variant
 }
 
 bool JavaClass::_set_field(jobject p_instance, const StringName &p_name, const Variant &p_property) {
-	if (fields.has(p_name)) {
-		const JavaClass::FieldInfo field_info = fields[p_name];
-
+	if (const FieldInfo *field_info = fields.getptr(p_name)) {
 		JNIEnv *env = get_jni_env();
 		ERR_FAIL_NULL_V(env, false);
-		return _set_field_value(env, p_instance, _class, field_info, p_property);
+		return _set_field_value(env, p_instance, _class, *field_info, p_property);
 	}
 
 	// Check the parent class.

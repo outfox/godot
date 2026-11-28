@@ -30,7 +30,10 @@
 
 import SwiftUI
 
+// 2dog: a libgodot archive keeps the wrapper for Swift hosts but leaves the process entry point to the app.
+#if !GODOT_LIBRARY
 @main
+#endif
 struct SwiftUIApp: App {
 	@UIApplicationDelegateAdaptor(GDTAppDelegateIOS.self) var appDelegate
 	@Environment(\.scenePhase) private var scenePhase

@@ -77,6 +77,7 @@ private:
 
 	Ref<ButtonGroup> button_group;
 
+	bool _has_visible_point(const Point2 &p_point) const;
 	void _unpress_group();
 	void _pressed();
 	void _toggled(bool p_pressed);
@@ -102,6 +103,9 @@ protected:
 	GDVIRTUAL1(_toggled, bool)
 
 public:
+	// 2dog: register project settings for each engine instance.
+	static void register_settings();
+
 	enum DrawMode {
 		DRAW_NORMAL,
 		DRAW_PRESSED,
