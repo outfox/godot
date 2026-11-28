@@ -76,11 +76,11 @@ half V_GGX(half NdotL, half NdotV, half alpha) {
 }
 
 half D_GGX_anisotropic(half cos_theta_m, half alpha_x, half alpha_y, half cos_phi, half sin_phi) {
-	half alpha2 = alpha_x * alpha_y;
-	vec3 v = vec3(alpha_y * cos_phi, alpha_x * sin_phi, alpha2 * cos_theta_m);
-	float v2 = dot(v, v);
-	half w2 = half(float(alpha2) / v2);
-	return alpha2 * w2 * w2 * half(1.0 / M_PI);
+	// The reciprocal can exceed the half-float range even when the final distribution is representable.
+	float alpha2 = float(alpha_x) * float(alpha_y);
+	vec3 v = vec3(alpha_y, alpha_x, alpha2) * vec3(cos_phi, sin_phi, cos_theta_m);
+	float w2 = alpha2 / dot(v, v);
+	return saturateHalf(alpha2 * w2 * w2 * (1.0 / M_PI));
 }
 
 half V_GGX_anisotropic(half alpha_x, half alpha_y, half TdotV, half TdotL, half BdotV, half BdotL, half NdotV, half NdotL) {
