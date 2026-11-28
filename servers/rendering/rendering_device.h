@@ -449,6 +449,26 @@ public:
 		RDD::TextureID driver_texture_id = {}; // For readback conversion.
 	};
 
+	// 2dog: Downloads for drivers that can't wait for a map (async_texture_readback). Each owns a staging buffer
+	// and is delivered once its map has completed, independent of frame slots.
+	struct PendingDownload {
+		RDD::BufferID staging;
+		bool map_initiated = false;
+		Callable callback;
+		uint32_t size = 0; // Buffer downloads: bytes to deliver.
+		bool is_texture = false;
+		TextureGetDataRequest texture_request;
+		Vector<RDD::BufferTextureCopyRegion> texture_regions;
+		Vector<uint32_t> texture_mipmap_offsets;
+	};
+
+	List<PendingDownload> pending_downloads;
+
+	Error _buffer_queue_pending_download(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size, const Callable &p_callback);
+	void _texture_download_copy_region(const TextureGetDataRequest &p_request, const RDD::BufferTextureCopyRegion &p_region, const uint8_t *p_buffer_data, uint32_t p_mipmap_offset, uint8_t *p_dst_data);
+	void _pending_downloads_initiate_maps();
+	void _pending_downloads_deliver();
+
 public:
 	struct TextureView {
 		DataFormat format_override = DATA_FORMAT_MAX; // // Means, use same as format.

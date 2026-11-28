@@ -1214,6 +1214,23 @@ void RenderingDeviceDriverWebGPU::buffer_initiate_async_map(BufferID p_buffer) {
 	}
 }
 
+bool RenderingDeviceDriverWebGPU::buffer_is_readable(BufferID p_buffer) {
+	WGBuffer *buf = (WGBuffer *)(p_buffer.id);
+	ERR_FAIL_NULL_V(buf, false);
+	if (!buf->is_readback) {
+		return true;
+	}
+	if (buf->map_pending) {
+		// 2dog: Threaded builds deliver map callbacks only from ProcessEvents.
+		WGPUInstance inst = context_driver ? context_driver->get_instance() : nullptr;
+		if (inst) {
+			wgpuInstanceProcessEvents(inst);
+		}
+	}
+	// A map that was never initiated is neither pending nor complete.
+	return !buf->map_pending && buf->map_complete;
+}
+
 uint32_t RenderingDeviceDriverWebGPU::texture_get_gpu_pixel_size(TextureID p_texture) {
 	WGTexture *tex = (WGTexture *)(p_texture.id);
 	if (!tex || tex->rd_format == DATA_FORMAT_MAX) {

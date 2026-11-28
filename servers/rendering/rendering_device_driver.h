@@ -213,6 +213,8 @@ public:
 	virtual uint64_t buffer_get_dynamic_offsets(Span<BufferID> p_buffers) = 0;
 	virtual void buffer_flush(BufferID p_buffer, uint64_t p_offset = 0, uint64_t p_size = 0) {}
 	virtual void buffer_initiate_async_map(BufferID p_buffer) {} // WebGPU: start async map so it completes by next frame.
+	// 2dog: False while an asynchronous map started by buffer_initiate_async_map() has not completed yet.
+	virtual bool buffer_is_readable(BufferID p_buffer) { return true; }
 	// Direct queue write to a buffer, bypassing staging buffers entirely.
 	// Used for skeleton/bone updates that are fully written before any draws.
 	virtual void buffer_write_direct(BufferID p_buffer, uint64_t p_offset, uint64_t p_size, const void *p_data) {}
