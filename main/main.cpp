@@ -2080,6 +2080,13 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 			if (N) {
 				main_pack = N->get();
 				N = N->next();
+#ifdef WEB_ENABLED
+				// 2dog: a pack is reopened by its path for every file. A relative path fails while another thread's
+				// DirAccess has the working directory changed, so resolve it once, before any thread exists.
+				if (main_pack.is_relative_path()) {
+					main_pack = OS::get_singleton()->get_cwd().path_join(main_pack);
+				}
+#endif
 
 #if defined(ANDROID_ENABLED) && !defined(OVERRIDE_PATH_ENABLED)
 				// Validate that `main_pack` is located within the 'assets' directory.
