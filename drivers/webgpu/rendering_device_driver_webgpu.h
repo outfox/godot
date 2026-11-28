@@ -320,13 +320,7 @@ public:
 			uint32_t p_width, uint32_t p_height) override final;
 	/// Stub — WebGPU has no buffer device addresses. Returns 0.
 	virtual uint64_t buffer_get_device_address(BufferID p_buffer) override final;
-	/// WebGPU-specific: direct buffer readback using persistent staging buffer cache.
-	/// Always handles the request on web: r_data stays empty until the first async readback
-	/// lands (1-frame latency), then holds the most recent completed readback.
-	/// Bypasses the default staging buffer path which can't handle WebGPU's async-only map.
-	virtual bool buffer_get_data_direct(BufferID p_buffer, uint64_t p_offset, uint64_t p_size, Vector<uint8_t> &r_data) override final;
-
-	/// Persistent readback entry for async buffer/texture map operations.
+	/// Persistent readback entry for async texture map operations.
 	/// Heap-allocated so that pointers remain stable across HashMap rehashes
 	/// and can safely be passed to async WebGPU map callbacks.
 	struct ReadbackEntry {
@@ -362,7 +356,7 @@ public:
 	/// Get the copyable layout (row pitch, size) for a texture subresource.
 	/// WebGPU requires 256-byte row alignment for buffer↔texture copies.
 	virtual void texture_get_copyable_layout(TextureID p_texture, const TextureSubresource &p_subresource, TextureCopyableLayout *r_layout) override final;
-	/// Read texture data back to CPU. Uses same persistent readback cache as buffer_get_data_direct.
+	/// Read texture data back to CPU. Uses a persistent readback cache keyed by texture and layer.
 	/// Returns zeros on first call (1-frame latency), valid data on subsequent calls.
 	virtual Vector<uint8_t> texture_get_data(TextureID p_texture, uint32_t p_layer) override final;
 	/// Query which texture usage bits are supported for a given format.

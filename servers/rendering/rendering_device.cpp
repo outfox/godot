@@ -1377,11 +1377,9 @@ Vector<uint8_t> RenderingDevice::buffer_get_data(RID p_buffer, uint32_t p_offset
 				"Size is larger than the buffer.");
 	}
 
-	// Allow the driver to handle readback directly (e.g., WebGPU async readback
-	// with persistent staging buffers).
-	Vector<uint8_t> direct_data;
-	if (driver->buffer_get_data_direct(buffer->driver_id, p_offset, p_size, direct_data)) {
-		return direct_data;
+	if (driver->get_driver_workarounds().async_texture_readback) {
+		// 2dog: The stall below can't wait for an asynchronous map.
+		return _buffer_get_data_cached(p_buffer, buffer, p_offset, p_size);
 	}
 
 	_check_transfer_worker_buffer(buffer);
@@ -1502,7 +1500,32 @@ Error RenderingDevice::buffer_get_data_async(RID p_buffer, const Callable &p_cal
 	return OK;
 }
 
-Error RenderingDevice::_buffer_queue_pending_download(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size, const Callable &p_callback) {
+Vector<uint8_t> RenderingDevice::_buffer_get_data_cached(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size) {
+	_check_transfer_worker_buffer(p_buffer);
+
+	bool refresh_pending = false;
+	for (const PendingDownload &download : pending_downloads) {
+		if (download.cache_buffer == p_buffer_rid) {
+			refresh_pending = true;
+			break;
+		}
+	}
+	if (!refresh_pending) {
+		// The whole buffer is read back, so one pending request covers every range.
+		ERR_FAIL_COND_V(_buffer_queue_pending_download(p_buffer_rid, p_buffer, 0, p_buffer->size, Callable(), true) != OK, Vector<uint8_t>());
+	}
+
+	// Returns the last completed readback, so it lags one request behind; empty until the first one lands.
+	const Vector<uint8_t> *cached = buffer_readback_cache.getptr(p_buffer_rid);
+	Vector<uint8_t> result;
+	if (cached != nullptr && (uint64_t)p_offset + p_size <= (uint64_t)cached->size()) {
+		result.resize(p_size);
+		memcpy(result.ptrw(), cached->ptr() + p_offset, p_size);
+	}
+	return result;
+}
+
+Error RenderingDevice::_buffer_queue_pending_download(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size, const Callable &p_callback, bool p_cache_result) {
 	// 2dog: The staging buffer is dedicated to this request, so it outlives the frame slot that records the copy.
 	RDD::BufferID staging = driver->buffer_create(p_size, RDD::BUFFER_USAGE_TRANSFER_TO_BIT, RDD::MEMORY_ALLOCATION_TYPE_CPU, frames_drawn);
 	ERR_FAIL_COND_V(!staging, ERR_CANT_CREATE);
@@ -1522,6 +1545,9 @@ Error RenderingDevice::_buffer_queue_pending_download(RID p_buffer_rid, Buffer *
 	download.staging = staging;
 	download.callback = p_callback;
 	download.size = p_size;
+	if (p_cache_result) {
+		download.cache_buffer = p_buffer_rid;
+	}
 	pending_downloads.push_back(download);
 	return OK;
 }
@@ -1614,7 +1640,14 @@ void RenderingDevice::_pending_downloads_deliver() {
 		// The map only completes after the copy ran, so the buffer is no longer in use by the GPU.
 		driver->buffer_free(download.staging);
 
-		download.callback.call(packed_byte_array);
+		if (download.cache_buffer.is_valid()) {
+			// Skip buffers freed while the download was in flight; their RID no longer resolves.
+			if (_get_buffer_from_owner(download.cache_buffer) != nullptr) {
+				buffer_readback_cache[download.cache_buffer] = packed_byte_array;
+			}
+		} else {
+			download.callback.call(packed_byte_array);
+		}
 	}
 }
 
@@ -8202,6 +8235,8 @@ void RenderingDevice::_free_internal(RID p_id) {
 	}
 #endif
 
+	buffer_readback_cache.erase(p_id);
+
 	// Push everything so it's disposed of next time this frame index is processed (means, it's safe to do it).
 	if (texture_owner.owns(p_id)) {
 		Texture *texture = texture_owner.get_or_null(p_id);
@@ -9719,6 +9754,7 @@ void RenderingDevice::finalize() {
 		driver->buffer_free(download.staging);
 	}
 	pending_downloads.clear();
+	buffer_readback_cache.clear();
 
 	while (vertex_formats.size()) {
 		HashMap<VertexFormatID, VertexDescriptionCache>::Iterator temp = vertex_formats.begin();

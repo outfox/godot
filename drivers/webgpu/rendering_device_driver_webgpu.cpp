@@ -837,8 +837,7 @@ RDD::BufferID RenderingDeviceDriverWebGPU::buffer_create(uint64_t p_size, BitFie
 	buf->requested_size = p_size;
 
 	// Don't add MapRead to generic CPU buffers — it conflicts with CopySrc.
-	// Compute readback uses buffer_get_data_direct() which creates its own
-	// staging buffer with the correct CopyDst|MapRead usage.
+	// Compute readback copies into a dedicated staging buffer (see the exception below).
 	//
 	// Task 7.8: Narrow exception — a "CPU + TRANSFER_TO + no TRANSFER_FROM"
 	// buffer is a pure GPU→CPU staging buffer (dest-only, never the source of
@@ -916,24 +915,6 @@ void RenderingDeviceDriverWebGPU::buffer_free(BufferID p_buffer) {
 		buffer_map(p_buffer); // Complete the native future before releasing its userdata.
 	}
 #endif
-
-	// Drop any readback-cache entry for this buffer.
-	uint64_t key = (uint64_t)(uintptr_t)buf;
-	if (_readback_cache.has(key)) {
-		ReadbackEntry *entry = _readback_cache[key];
-		if (!entry->map_complete) {
-			entry->cancelled = true;
-		} else {
-			if (entry->staging) {
-				wgpuBufferRelease(entry->staging);
-			}
-			if (entry->shadow) {
-				memfree(entry->shadow);
-			}
-			memdelete(entry);
-		}
-		_readback_cache.erase(key);
-	}
 
 	// If an async map callback is in flight for this buffer, mark it freed
 	// and let the callback handle cleanup (use-after-free prevention).
@@ -1326,73 +1307,6 @@ void RenderingDeviceDriverWebGPU::_readback_map_cb(WGPUMapAsyncStatus p_status, 
 	}
 	entry->map_pending = false;
 	entry->map_complete = true;
-}
-
-bool RenderingDeviceDriverWebGPU::buffer_get_data_direct(BufferID p_buffer, uint64_t p_offset, uint64_t p_size, Vector<uint8_t> &r_data) {
-#ifndef WEB_ENABLED
-	return false; // Native callers can use RD's synchronous staging-buffer path.
-#else
-	WGBuffer *buf = (WGBuffer *)(p_buffer.id);
-	ERR_FAIL_NULL_V(buf, false);
-
-	uint64_t key = (uint64_t)(uintptr_t)buf;
-	ReadbackEntry *entry = nullptr;
-
-	if (_readback_cache.has(key)) {
-		entry = _readback_cache[key];
-	}
-
-	// First call for this buffer: create its persistent staging buffer.
-	if (!entry) {
-		entry = memnew(ReadbackEntry);
-		entry->size = buf->size;
-		entry->shadow = (uint8_t *)memalloc(buf->size);
-		memset(entry->shadow, 0, buf->size);
-
-		// Create persistent staging buffer with CopyDst + MapRead.
-		WGPUBufferDescriptor desc = {};
-		desc.size = (buf->size + 3) & ~3ULL;
-		desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
-		entry->staging = wgpuDeviceCreateBuffer(device, &desc);
-		if (!entry->staging) {
-			memfree(entry->shadow);
-			memdelete(entry);
-			ERR_FAIL_V_MSG(false, "WebGPU: buffer_get_data_direct: failed to create staging buffer.");
-		}
-		entry->map_complete = false;
-		entry->has_data = false;
-
-		_readback_cache[key] = entry;
-	}
-
-	// Return the latest completed readback, or empty data while none has landed yet.
-	// Always report the request as handled: RD's fallback would stall and read zeros.
-	if (entry->has_data) {
-		r_data.resize(p_size);
-		memcpy(r_data.ptrw(), entry->shadow + p_offset, p_size);
-	} else {
-		r_data.clear();
-	}
-
-	// Re-arm after every finished map, including failed ones, so later calls see fresh data.
-	if (!entry->map_pending) {
-		entry->map_pending = true;
-		entry->map_complete = false;
-		WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, nullptr);
-		wgpuCommandEncoderCopyBufferToBuffer(encoder, buf->handle, 0, entry->staging, 0, entry->size);
-		WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, nullptr);
-		wgpuQueueSubmit(queue, 1, &cmd);
-		wgpuCommandBufferRelease(cmd);
-		wgpuCommandEncoderRelease(encoder);
-
-		WGPUBufferMapCallbackInfo cb = {};
-		cb.mode = WEBGPU_CALLBACK_MODE;
-		cb.callback = _readback_map_cb;
-		cb.userdata1 = entry;
-		wgpuBufferMapAsync(entry->staging, WGPUMapMode_Read, 0, entry->size, cb);
-	}
-	return true;
-#endif
 }
 
 WGPUBufferUsage RenderingDeviceDriverWebGPU::_buffer_usage_to_wgpu(BitField<BufferUsageBits> p_usage) const {
@@ -1830,7 +1744,7 @@ Vector<uint8_t> RenderingDeviceDriverWebGPU::texture_get_data(TextureID p_textur
 	WGTexture *tex = (WGTexture *)(p_texture.id);
 	ERR_FAIL_NULL_V(tex, Vector<uint8_t>());
 
-	// Same frame-deferred readback pattern as buffer_get_data_direct.
+	// Frame-deferred readback through a persistent staging buffer.
 	// First call: copy texture → staging buffer, initiate async map, return zeros.
 	// Subsequent calls: return cached data from completed async map.
 
