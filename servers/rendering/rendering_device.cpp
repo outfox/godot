@@ -1377,11 +1377,9 @@ Vector<uint8_t> RenderingDevice::buffer_get_data(RID p_buffer, uint32_t p_offset
 				"Size is larger than the buffer.");
 	}
 
-	// Allow the driver to handle readback directly (e.g., WebGPU async readback
-	// with persistent staging buffers).
-	Vector<uint8_t> direct_data;
-	if (driver->buffer_get_data_direct(buffer->driver_id, p_offset, p_size, direct_data)) {
-		return direct_data;
+	if (driver->get_driver_workarounds().async_texture_readback) {
+		// 2dog: The stall below can't wait for an asynchronous map.
+		return _buffer_get_data_cached(p_buffer, buffer, p_offset, p_size);
 	}
 
 	_check_transfer_worker_buffer(buffer);
@@ -1431,6 +1429,10 @@ Error RenderingDevice::buffer_get_data_async(RID p_buffer, const Callable &p_cal
 	ERR_FAIL_COND_V_MSG(!p_callback.is_valid(), ERR_INVALID_PARAMETER, "Callback must be valid.");
 
 	_check_transfer_worker_buffer(buffer);
+
+	if (driver->get_driver_workarounds().async_texture_readback) {
+		return _buffer_queue_pending_download(p_buffer, buffer, p_offset, p_size, p_callback);
+	}
 
 	BufferGetDataRequest get_data_request;
 	get_data_request.callback = p_callback;
@@ -1496,6 +1498,174 @@ Error RenderingDevice::buffer_get_data_async(RID p_buffer, const Callable &p_cal
 	}
 
 	return OK;
+}
+
+Vector<uint8_t> RenderingDevice::_buffer_get_data_cached(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size) {
+	_check_transfer_worker_buffer(p_buffer);
+
+	BufferReadback &readback = buffer_readbacks[p_buffer_rid];
+	readback.last_read_frame = frames_drawn;
+	if (!readback.pending) {
+		if (!readback.staging) {
+			readback.staging = driver->buffer_create(p_buffer->size, RDD::BUFFER_USAGE_TRANSFER_TO_BIT, RDD::MEMORY_ALLOCATION_TYPE_CPU, frames_drawn);
+			ERR_FAIL_COND_V(!readback.staging, Vector<uint8_t>());
+		}
+		// The whole buffer is read back, so one pending request covers every range.
+		ERR_FAIL_COND_V(_buffer_queue_pending_download(p_buffer_rid, p_buffer, 0, p_buffer->size, Callable(), readback.staging) != OK, Vector<uint8_t>());
+		readback.pending = true;
+	}
+
+	// Returns the last completed readback, so it lags one request behind; empty until the first one lands.
+	Vector<uint8_t> result;
+	if ((uint64_t)p_offset + p_size <= (uint64_t)readback.data.size()) {
+		result.resize(p_size);
+		memcpy(result.ptrw(), readback.data.ptr() + p_offset, p_size);
+	}
+	return result;
+}
+
+Error RenderingDevice::_buffer_queue_pending_download(RID p_buffer_rid, Buffer *p_buffer, uint32_t p_offset, uint32_t p_size, const Callable &p_callback, RDD::BufferID p_cache_staging) {
+	// 2dog: The staging buffer is not a pooled block, so it outlives the frame slot that records the copy.
+	RDD::BufferID staging = p_cache_staging;
+	if (!staging) {
+		staging = driver->buffer_create(p_size, RDD::BUFFER_USAGE_TRANSFER_TO_BIT, RDD::MEMORY_ALLOCATION_TYPE_CPU, frames_drawn);
+		ERR_FAIL_COND_V(!staging, ERR_CANT_CREATE);
+	}
+
+	RDD::BufferCopyRegion region;
+	region.src_offset = p_offset;
+	region.dst_offset = 0;
+	region.size = p_size;
+
+	if (_buffer_make_mutable(p_buffer, p_buffer_rid)) {
+		// The buffer must be mutable to be used as a copy source.
+		draw_graph.add_synchronization();
+	}
+	draw_graph.add_buffer_get_data(p_buffer->driver_id, p_buffer->draw_tracker, staging, region);
+
+	PendingDownload download;
+	download.staging = staging;
+	download.callback = p_callback;
+	download.size = p_size;
+	if (p_cache_staging) {
+		download.cache_buffer = p_buffer_rid;
+		download.owns_staging = false;
+	}
+	pending_downloads.push_back(download);
+	return OK;
+}
+
+void RenderingDevice::_pending_downloads_initiate_maps() {
+	// Called right after the frame's submit, so the recorded copies are already on the queue.
+	for (PendingDownload &download : pending_downloads) {
+		if (!download.map_initiated) {
+			driver->buffer_initiate_async_map(download.staging);
+			download.map_initiated = true;
+		}
+	}
+}
+
+void RenderingDevice::_texture_download_copy_region(const TextureGetDataRequest &p_request, const RDD::BufferTextureCopyRegion &p_region, const uint8_t *p_buffer_data, uint32_t p_mipmap_offset, uint8_t *p_dst_data) {
+	// Find the block size of the texture's format.
+	uint32_t block_w = 0;
+	uint32_t block_h = 0;
+	get_compressed_image_format_block_dimensions(p_request.format, block_w, block_h);
+
+	uint32_t block_size = get_compressed_image_format_block_byte_size(p_request.format);
+	uint32_t pixel_size = get_image_format_pixel_size(p_request.format);
+	uint32_t region_size = texture_download_region_size_px;
+
+	uint32_t w = STEPIFY(p_request.width >> p_region.texture_subresource.mipmap, block_w);
+	uint32_t h = STEPIFY(p_request.height >> p_region.texture_subresource.mipmap, block_h);
+	uint32_t region_w = MIN(region_size, w - p_region.texture_offset.x);
+	uint32_t region_h = MIN(region_size, h - p_region.texture_offset.y);
+
+	const uint8_t *read_ptr = p_buffer_data + p_region.buffer_offset;
+	uint8_t *write_ptr = p_dst_data + p_mipmap_offset;
+	uint32_t unit_size = pixel_size;
+	if (block_w != 1 || block_h != 1) {
+		unit_size = block_size;
+	}
+
+	write_ptr += ((p_region.texture_offset.y / block_h) * (w / block_w) + (p_region.texture_offset.x / block_w)) * unit_size;
+
+	if (p_request.gpu_pixel_size > 0 && block_w == 1 && block_h == 1) {
+		// Driver promoted the format (e.g. R8→R32Float). The staging
+		// buffer holds GPU-format data that must be converted back.
+		uint32_t dst_pitch = (w / block_w) * unit_size;
+		driver->texture_readback_convert(p_request.driver_texture_id,
+				read_ptr, p_region.row_pitch,
+				write_ptr, dst_pitch,
+				region_w, region_h);
+	} else {
+		for (uint32_t y = region_h / block_h; y > 0; y--) {
+			memcpy(write_ptr, read_ptr, (region_w / block_w) * unit_size);
+			write_ptr += (w / block_w) * unit_size;
+			read_ptr += p_region.row_pitch;
+		}
+	}
+}
+
+void RenderingDevice::_pending_downloads_deliver() {
+	thread_local PackedByteArray packed_byte_array;
+
+	// Callbacks may queue new downloads; those are not initiated yet and stay pending.
+	for (List<PendingDownload>::Element *E = pending_downloads.front(); E;) {
+		List<PendingDownload>::Element *next = E->next();
+		// Results are delivered in request order, so a download waits for the ones queued before it.
+		if (!E->get().map_initiated || !driver->buffer_is_readable(E->get().staging)) {
+			break;
+		}
+
+		PendingDownload download = E->get();
+		pending_downloads.erase(E);
+		E = next;
+
+		const uint8_t *buffer_data = driver->buffer_map(download.staging);
+		BufferReadback *readback = download.owns_staging ? nullptr : buffer_readbacks.getptr(download.cache_buffer);
+		if (readback != nullptr) {
+			readback->pending = false;
+		}
+		if (buffer_data == nullptr) {
+			ERR_PRINT("Failed to map the staging buffer of an asynchronous download.");
+			if (download.owns_staging) {
+				driver->buffer_free(download.staging);
+			}
+			continue;
+		}
+
+		if (download.is_texture) {
+			const TextureGetDataRequest &request = download.texture_request;
+			packed_byte_array.resize(get_image_format_required_size(request.format, request.width, request.height, request.depth, request.mipmaps));
+			for (int i = 0; i < download.texture_regions.size(); i++) {
+				_texture_download_copy_region(request, download.texture_regions[i], buffer_data, download.texture_mipmap_offsets[i], packed_byte_array.ptrw());
+			}
+		} else {
+			packed_byte_array.resize(download.size);
+			memcpy(packed_byte_array.ptrw(), buffer_data, download.size);
+		}
+
+		driver->buffer_unmap(download.staging);
+		if (download.owns_staging) {
+			// The map only completes after the copy ran, so the buffer is no longer in use by the GPU.
+			driver->buffer_free(download.staging);
+		}
+
+		if (readback != nullptr) {
+			readback->data = packed_byte_array;
+		} else if (download.callback.is_valid()) {
+			download.callback.call(packed_byte_array);
+		}
+	}
+
+	// Staging buffers of buffers nobody reads any more are released; the last result stays available.
+	for (KeyValue<RID, BufferReadback> &E : buffer_readbacks) {
+		BufferReadback &readback = E.value;
+		if (readback.staging && !readback.pending && frames_drawn - readback.last_read_frame > BUFFER_READBACK_IDLE_FRAMES) {
+			driver->buffer_free(readback.staging);
+			readback.staging = RDD::BufferID();
+		}
+	}
 }
 
 uint64_t RenderingDevice::buffer_get_device_address(RID p_buffer) {
@@ -3099,6 +3269,13 @@ Error RenderingDevice::texture_get_data_async(RID p_texture, uint32_t p_layer, c
 	uint32_t block_write_offset;
 	uint32_t block_write_amount;
 	StagingRequiredAction required_action;
+
+	// 2dog: Pending downloads use one dedicated staging buffer sized for all regions instead of the pooled blocks.
+	const bool use_pending = driver->get_driver_workarounds().async_texture_readback;
+	uint32_t pending_staging_size = 0;
+	Vector<RDD::BufferTextureCopyRegion> pending_regions;
+	Vector<uint32_t> pending_mipmap_offsets;
+
 	for (uint32_t i = 0; i < tex->mipmaps; i++) {
 		uint32_t image_total = get_image_format_required_size(tex->format, tex->width, tex->height, tex->depth, i + 1, &w, &h, &d);
 		uint32_t tight_mip_size = image_total - mipmap_offset;
@@ -3116,22 +3293,27 @@ Error RenderingDevice::texture_get_data_async(RID p_texture, uint32_t p_layer, c
 					region_pitch = STEPIFY(region_pitch, pitch_step);
 
 					uint32_t to_allocate = region_pitch * region_h;
-					Error err = _staging_buffer_allocate(download_staging_buffers, to_allocate, required_align, block_write_offset, block_write_amount, required_action, false);
-					ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
+					if (use_pending) {
+						block_write_offset = STEPIFY(pending_staging_size, required_align);
+						pending_staging_size = block_write_offset + to_allocate;
+					} else {
+						Error err = _staging_buffer_allocate(download_staging_buffers, to_allocate, required_align, block_write_offset, block_write_amount, required_action, false);
+						ERR_FAIL_COND_V(err, ERR_CANT_CREATE);
 
-					const bool flush_frames = (get_data_request.frame_local_count > 0) && required_action == STAGING_REQUIRED_ACTION_FLUSH_AND_STALL_ALL;
-					if (flush_frames) {
-						for (uint32_t j = 0; j < get_data_request.frame_local_count; j++) {
-							uint32_t local_index = get_data_request.frame_local_index + j;
-							draw_graph.add_texture_get_data(tex->driver_id, tex->draw_tracker, frames[frame].download_texture_staging_buffers[local_index], frames[frame].download_buffer_texture_copy_regions[local_index]);
+						const bool flush_frames = (get_data_request.frame_local_count > 0) && required_action == STAGING_REQUIRED_ACTION_FLUSH_AND_STALL_ALL;
+						if (flush_frames) {
+							for (uint32_t j = 0; j < get_data_request.frame_local_count; j++) {
+								uint32_t local_index = get_data_request.frame_local_index + j;
+								draw_graph.add_texture_get_data(tex->driver_id, tex->draw_tracker, frames[frame].download_texture_staging_buffers[local_index], frames[frame].download_buffer_texture_copy_regions[local_index]);
+							}
 						}
-					}
 
-					_staging_buffer_execute_required_action(download_staging_buffers, required_action);
+						_staging_buffer_execute_required_action(download_staging_buffers, required_action);
 
-					if (flush_frames) {
-						get_data_request.frame_local_count = 0;
-						get_data_request.frame_local_index = frames[frame].download_buffer_texture_copy_regions.size();
+						if (flush_frames) {
+							get_data_request.frame_local_count = 0;
+							get_data_request.frame_local_index = frames[frame].download_buffer_texture_copy_regions.size();
+						}
 					}
 
 					RDD::BufferTextureCopyRegion copy_region;
@@ -3142,12 +3324,17 @@ Error RenderingDevice::texture_get_data_async(RID p_texture, uint32_t p_layer, c
 					copy_region.texture_subresource.layer = p_layer;
 					copy_region.texture_offset = Vector3i(x, y, z);
 					copy_region.texture_region_size = Vector3i(region_logic_w, region_logic_h, 1);
-					frames[frame].download_texture_staging_buffers.push_back(download_staging_buffers.blocks[download_staging_buffers.current].driver_id);
-					frames[frame].download_buffer_texture_copy_regions.push_back(copy_region);
-					frames[frame].download_texture_mipmap_offsets.push_back(mipmap_offset + (tight_mip_size / d) * z);
-					get_data_request.frame_local_count++;
+					if (use_pending) {
+						pending_regions.push_back(copy_region);
+						pending_mipmap_offsets.push_back(mipmap_offset + (tight_mip_size / d) * z);
+					} else {
+						frames[frame].download_texture_staging_buffers.push_back(download_staging_buffers.blocks[download_staging_buffers.current].driver_id);
+						frames[frame].download_buffer_texture_copy_regions.push_back(copy_region);
+						frames[frame].download_texture_mipmap_offsets.push_back(mipmap_offset + (tight_mip_size / d) * z);
+						get_data_request.frame_local_count++;
 
-					download_staging_buffers.blocks.write[download_staging_buffers.current].fill_amount = block_write_offset + block_write_amount;
+						download_staging_buffers.blocks.write[download_staging_buffers.current].fill_amount = block_write_offset + block_write_amount;
+					}
 				}
 			}
 		}
@@ -3155,6 +3342,25 @@ Error RenderingDevice::texture_get_data_async(RID p_texture, uint32_t p_layer, c
 		mipmap_offset = image_total;
 		logic_w = MAX(1u, logic_w >> 1);
 		logic_h = MAX(1u, logic_h >> 1);
+	}
+
+	if (use_pending) {
+		RDD::BufferID staging = driver->buffer_create(pending_staging_size, RDD::BUFFER_USAGE_TRANSFER_TO_BIT, RDD::MEMORY_ALLOCATION_TYPE_CPU, frames_drawn);
+		ERR_FAIL_COND_V(!staging, ERR_CANT_CREATE);
+
+		for (int i = 0; i < pending_regions.size(); i++) {
+			draw_graph.add_texture_get_data(tex->driver_id, tex->draw_tracker, staging, pending_regions[i]);
+		}
+
+		PendingDownload download;
+		download.staging = staging;
+		download.callback = p_callback;
+		download.is_texture = true;
+		download.texture_request = get_data_request;
+		download.texture_regions = pending_regions;
+		download.texture_mipmap_offsets = pending_mipmap_offsets;
+		pending_downloads.push_back(download);
+		return OK;
 	}
 
 	if (get_data_request.frame_local_count > 0) {
@@ -8046,6 +8252,20 @@ void RenderingDevice::_free_internal(RID p_id) {
 	}
 #endif
 
+	if (BufferReadback *readback = buffer_readbacks.getptr(p_id)) {
+		// 2dog: a download still in flight takes its staging buffer along and frees it on delivery.
+		for (PendingDownload &download : pending_downloads) {
+			if (download.cache_buffer == p_id) {
+				download.owns_staging = true;
+				readback->staging = RDD::BufferID();
+			}
+		}
+		if (readback->staging) {
+			driver->buffer_free(readback->staging);
+		}
+		buffer_readbacks.erase(p_id);
+	}
+
 	// Push everything so it's disposed of next time this frame index is processed (means, it's safe to do it).
 	if (texture_owner.owns(p_id)) {
 		Texture *texture = texture_owner.get_or_null(p_id);
@@ -8599,6 +8819,7 @@ void RenderingDevice::_begin_frame(bool p_presented) {
 	GodotProfileZoneGroupedFirst(_profile_zone, "_stall_for_frame");
 	// Before writing to this frame, wait for it to be finished.
 	_stall_for_frame(frame);
+	_pending_downloads_deliver();
 
 	if (command_pool_reset_enabled) {
 		GodotProfileZoneGrouped(_profile_zone, "driver->command_pool_reset");
@@ -8790,6 +9011,7 @@ void RenderingDevice::_execute_frame(bool p_present) {
 	for (uint32_t i = 0; i < frames[frame].download_texture_staging_buffers.size(); i++) {
 		driver->buffer_initiate_async_map(frames[frame].download_texture_staging_buffers[i]);
 	}
+	_pending_downloads_initiate_maps();
 
 	if (frame_can_present) {
 		if (separate_present_queue) {
@@ -8842,48 +9064,12 @@ void RenderingDevice::_stall_for_frame(uint32_t p_frame) {
 				uint32_t texture_size = get_image_format_required_size(request.format, request.width, request.height, request.depth, request.mipmaps);
 				packed_byte_array.resize(texture_size);
 
-				// Find the block size of the texture's format.
-				uint32_t block_w = 0;
-				uint32_t block_h = 0;
-				get_compressed_image_format_block_dimensions(request.format, block_w, block_h);
-
-				uint32_t block_size = get_compressed_image_format_block_byte_size(request.format);
-				uint32_t pixel_size = get_image_format_pixel_size(request.format);
-				uint32_t region_size = texture_download_region_size_px;
-
 				for (uint32_t j = 0; j < request.frame_local_count; j++) {
 					uint32_t local_index = request.frame_local_index + j;
 					const RDD::BufferTextureCopyRegion &region = frames[p_frame].download_buffer_texture_copy_regions[local_index];
-					uint32_t w = STEPIFY(request.width >> region.texture_subresource.mipmap, block_w);
-					uint32_t h = STEPIFY(request.height >> region.texture_subresource.mipmap, block_h);
-					uint32_t region_w = MIN(region_size, w - region.texture_offset.x);
-					uint32_t region_h = MIN(region_size, h - region.texture_offset.y);
 
 					uint8_t *buffer_data = driver->buffer_map(frames[p_frame].download_texture_staging_buffers[local_index]);
-					const uint8_t *read_ptr = buffer_data + region.buffer_offset;
-					uint8_t *write_ptr = packed_byte_array.ptrw() + frames[p_frame].download_texture_mipmap_offsets[local_index];
-					uint32_t unit_size = pixel_size;
-					if (block_w != 1 || block_h != 1) {
-						unit_size = block_size;
-					}
-
-					write_ptr += ((region.texture_offset.y / block_h) * (w / block_w) + (region.texture_offset.x / block_w)) * unit_size;
-
-					if (request.gpu_pixel_size > 0 && block_w == 1 && block_h == 1) {
-						// Driver promoted the format (e.g. R8→R32Float). The staging
-						// buffer holds GPU-format data that must be converted back.
-						uint32_t dst_pitch = (w / block_w) * unit_size;
-						driver->texture_readback_convert(request.driver_texture_id,
-								read_ptr, region.row_pitch,
-								write_ptr, dst_pitch,
-								region_w, region_h);
-					} else {
-						for (uint32_t y = region_h / block_h; y > 0; y--) {
-							memcpy(write_ptr, read_ptr, (region_w / block_w) * unit_size);
-							write_ptr += (w / block_w) * unit_size;
-							read_ptr += region.row_pitch;
-						}
-					}
+					_texture_download_copy_region(request, region, buffer_data, frames[p_frame].download_texture_mipmap_offsets[local_index], packed_byte_array.ptrw());
 
 					driver->buffer_unmap(frames[p_frame].download_texture_staging_buffers[local_index]);
 				}
@@ -9591,6 +9777,20 @@ void RenderingDevice::finalize() {
 		driver->buffer_unmap(download_staging_buffers.blocks[i].driver_id);
 		driver->buffer_free(download_staging_buffers.blocks[i].driver_id);
 	}
+
+	// 2dog: Drop pending downloads without calling back; their callbacks are never delivered.
+	for (const PendingDownload &download : pending_downloads) {
+		if (download.owns_staging) {
+			driver->buffer_free(download.staging);
+		}
+	}
+	pending_downloads.clear();
+	for (const KeyValue<RID, BufferReadback> &E : buffer_readbacks) {
+		if (E.value.staging) {
+			driver->buffer_free(E.value.staging);
+		}
+	}
+	buffer_readbacks.clear();
 
 	while (vertex_formats.size()) {
 		HashMap<VertexFormatID, VertexDescriptionCache>::Iterator temp = vertex_formats.begin();

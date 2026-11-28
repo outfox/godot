@@ -75,6 +75,7 @@
 			<description>
 				Returns a copy of the data of the specified [param buffer], optionally [param offset_bytes] and [param size_bytes] can be set to copy only a portion of the buffer.
 				[b]Note:[/b] This method will block the GPU from working until the data is retrieved. Refer to [method buffer_get_data_async] for an alternative that returns the data in more performant way.
+				[b]Note:[/b] A web browser cannot wait for the GPU. With the WebGPU driver on the Web, each call requests a new readback and returns the result of the last completed one, or an empty array before the first has arrived, so the data is one request behind. Call the method again on a later frame, or use [method buffer_get_data_async].
 			</description>
 		</method>
 		<method name="buffer_get_data_async">
