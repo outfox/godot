@@ -14,7 +14,7 @@ const encodeDotnetResourceUrl = (defaultUri, name) => {
 };
 
 // 2dog: wrap the .NET runtime module as Godot's Emscripten module.
-const Godot = async (moduleConfig) => { // eslint-disable-line no-unused-vars
+const Godot = async (moduleConfig) => {
 	// 2dog: let .NET configure wasm instantiation for JS imports, exports, and threads.
 	delete moduleConfig['instantiateWasm'];
 
@@ -105,7 +105,9 @@ const Godot = async (moduleConfig) => { // eslint-disable-line no-unused-vars
 		pthreads['loadWasmModuleToWorker'] = (worker) => {
 			const loaded = loadWorker(worker);
 			const post = worker.postMessage.bind(worker);
-			worker.postMessage = (...args) => { loaded.then(() => post(...args)); };
+			worker.postMessage = (...args) => {
+				loaded.then(() => post(...args));
+			};
 			return loaded;
 		};
 	}
@@ -136,7 +138,9 @@ Godot['prepareWorkerWebGPU'] = async (module, canvas) => {
 		port1.onmessageerror = () => reject(new Error('The WebGPU worker reply could not be read.'));
 	});
 	let workerFailed;
-	const failed = new Promise((resolve, reject) => { workerFailed = () => reject(new Error('The WebGPU worker failed.')); });
+	const failed = new Promise((resolve, reject) => {
+		workerFailed = () => reject(new Error('The WebGPU worker failed.'));
+	});
 	worker.addEventListener('error', workerFailed);
 	try {
 		const canvasToken = crypto.randomUUID();
@@ -145,8 +149,10 @@ Godot['prepareWorkerWebGPU'] = async (module, canvas) => {
 		worker.postMessage({ 'godotWebGPU': port2, 'canvasSelector': canvasSelector }, [port2]);
 		await Promise.race([ready, failed]);
 		const offscreen = canvas.transferControlToOffscreen();
+		// eslint-disable-next-line require-atomic-updates
 		module['godotWebGPUSize'] = { width: offscreen.width, height: offscreen.height };
 		canvas.setAttribute('data-godot-webgpu', canvasToken);
+		// eslint-disable-next-line require-atomic-updates
 		module['godotWebGPUCanvasSelector'] = canvasSelector;
 		const attached = reply();
 		port1.postMessage(offscreen, [offscreen]);

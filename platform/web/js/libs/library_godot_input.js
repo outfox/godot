@@ -471,7 +471,7 @@ const GodotInput = {
 				const held = GodotInput.pressedShifts;
 				if (pIsPressed) {
 					// Windows browsers can mark the other Shift's first press as a repeat.
-					repeat = repeat && held.has(pEvent.code);
+					repeat &&= held.has(pEvent.code);
 					held.add(pEvent.code);
 				} else {
 					held.delete(pEvent.code);

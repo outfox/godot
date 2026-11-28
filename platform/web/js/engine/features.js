@@ -79,6 +79,7 @@ const Features = {
 		const {
 			// Quotes are needed for the Closure compiler.
 			'threads': supportsThreads = true,
+			// eslint-disable-next-line no-useless-rename
 			'renderingDriver': renderingDriver = new InternalConfig().renderingDriver,
 		} = supportedFeatures;
 

@@ -41,7 +41,7 @@ const GodotRuntime = {
 		 * Prints
 		 */
 		error: function () {
-			err.apply(null, Array.from(arguments)); // eslint-disable-line no-undef
+			err.apply(null, Array.from(arguments));
 		},
 
 		print: function () {

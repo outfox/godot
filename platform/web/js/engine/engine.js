@@ -210,8 +210,9 @@ const Engine = (function () {
 							if (me.rtenv['godotWebGPUSize']) {
 								throw err;
 							}
-							console.warn('WebGPU device unavailable; falling back to WebGL 2 Compatibility.', err);
+							console.warn('WebGPU device unavailable; falling back to WebGL 2 Compatibility.', err); // eslint-disable-line no-console
 							me.config.renderingDriver = 'opengl3';
+							// eslint-disable-next-line require-atomic-updates
 							webgpuFallback = true;
 						}
 					}
