@@ -67,6 +67,18 @@ const Engine = (function () {
 		loadPromise = null;
 	};
 
+	function selectArgsDriver(config) {
+		const args = config.args;
+		for (let i = 0; i + 1 < args.length; i++) {
+			if (args[i] === '--' || args[i] === '++') {
+				break;
+			}
+			if (args[i] === '--rendering-driver') {
+				config.renderingDriver = args[++i];
+			}
+		}
+	}
+
 	/**
 	 * Safe Engine constructor, creates a new prototype for every new instance to avoid prototype pollution.
 	 * @ignore
@@ -87,15 +99,7 @@ const Engine = (function () {
 				if (initPromise) {
 					return initPromise;
 				}
-				const args = this.config.args;
-				for (let i = 0; i + 1 < args.length; i++) {
-					if (args[i] === '--' || args[i] === '++') {
-						break;
-					}
-					if (args[i] === '--rendering-driver') {
-						this.config.renderingDriver = args[++i];
-					}
-				}
+				selectArgsDriver(this.config);
 				if (this.config.renderingDriver === 'webgpu' && webgpuUnavailableReason) {
 					return Promise.reject(new Error(webgpuUnavailableReason));
 				}
@@ -191,6 +195,11 @@ const Engine = (function () {
 					if (!me.rtenv) {
 						return Promise.reject(new Error('The engine must be initialized before it can be started'));
 					}
+					selectArgsDriver(me.config);
+					// 2dog: the device must exist before the runtime is created, so a late override cannot add one.
+					if (me.config.renderingDriver === 'webgpu' && !workerWebGPU && !webgpuFallback && !me.config.preinitializedWebGPUDevice) {
+						return Promise.reject(new Error('WebGPU must be selected before init; set renderingDriver in the Engine constructor.'));
+					}
 					const config = me.config.getGodotConfig(function () {
 						me.rtenv = null;
 					});
@@ -201,8 +210,9 @@ const Engine = (function () {
 							if (me.rtenv['godotWebGPUSize']) {
 								throw err;
 							}
-							console.warn('WebGPU device unavailable; falling back to WebGL 2 Compatibility.', err);
+							console.warn('WebGPU device unavailable; falling back to WebGL 2 Compatibility.', err); // eslint-disable-line no-console
 							me.config.renderingDriver = 'opengl3';
+							// eslint-disable-next-line require-atomic-updates
 							webgpuFallback = true;
 						}
 					}

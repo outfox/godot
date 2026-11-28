@@ -25,11 +25,17 @@ const emscriptenGlobals = {
 	'Module': true,
 	'UTF8ToString': true,
 	'UTF8Decoder': true,
+	'UTF8ArrayToString': true,
 	'_emscripten_webgl_get_current_context': true,
 	'_free': true,
 	'_malloc': true,
 	'autoAddDeps': true,
+	'addFunction': true,
 	'addToLibrary': true,
+	'alignMemory': true,
+	'err': true,
+	'findCanvasEventTarget': true,
+	'functionsInTableMap': true,
 	'addOnPostRun': true,
 	'getValue': true,
 	'lengthBytesUTF8': true,
@@ -37,9 +43,15 @@ const emscriptenGlobals = {
 	'runtimeKeepalivePop': true,
 	'runtimeKeepalivePush': true,
 	'setValue': true,
+	'stringToNewUTF8': true,
 	'stringToUTF8': true,
 	'stringToUTF8Array': true,
+	'updateTableMap': true,
+	'wasmExports': true,
+	'wasmImports': true,
+	'wasmMemory': true,
 	'wasmTable': true,
+	'zeroMemory': true,
 };
 
 module.exports = [
@@ -131,8 +143,10 @@ module.exports = [
 		languageOptions: {
 			globals: {
 				...globals.browser,
+				'___GODOT_THREADS_ENABLED': true, // Substituted by SCons before compilation.
 				'___GODOT_WEBGPU_UNAVAILABLE_REASON___': true, // Substituted by SCons before compilation.
 				'Features': true,
+				'godotRequestWebGPUDevice': true,
 				'Godot': true,
 				'InternalConfig': true,
 				'Preloader': true,
@@ -152,6 +166,7 @@ module.exports = [
 			globals: {
 				...globals.browser,
 				...emscriptenGlobals,
+				'DedicatedWorkerGlobalScope': true,
 				'GodotConfig': true,
 				'GodotEventListeners': true,
 				'GodotFS': true,
@@ -159,6 +174,8 @@ module.exports = [
 				'GodotAudio': true,
 				'GodotInput': true,
 				'GodotRuntime': true,
+				'GodotWebXRMainLoop': true,
+				'godotRequestWebGPUDevice': true,
 				'IDHandler': true,
 				'XRWebGLLayer': true,
 			},

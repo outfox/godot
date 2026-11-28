@@ -1,4 +1,4 @@
-function godotRequestWebGPUDevice(adapterOptions, deviceDescriptor) {
+function godotRequestWebGPUDevice(adapterOptions, deviceDescriptor) { // eslint-disable-line no-unused-vars
 	if (typeof navigator === 'undefined' || !navigator.gpu) {
 		return Promise.reject(new Error(
 			'WebGPU is not supported in this browser.\n'

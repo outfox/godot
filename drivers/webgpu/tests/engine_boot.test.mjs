@@ -285,3 +285,13 @@ test('an argv-only WebGPU request initializes the device', async () => {
     await new Engine({ args: ['--rendering-driver', 'opengl3', '--rendering-driver', 'webgpu'] }).init('godot');
     assert.equal(modules[0].preinitializedWebGPUDevice, device);
 });
+
+test('a WebGPU override after a separate init is rejected instead of starting without a device', async () => {
+    for (const override of [{ args: ['--rendering-driver', 'webgpu'] }, { renderingDriver: 'webgpu' }]) {
+        const { Engine, calls } = harness({ requestAdapter() { throw new Error('Unexpected adapter request'); } });
+        const engine = new Engine({ renderingDriver: 'opengl3' });
+        await engine.init('godot');
+        await assert.rejects(engine.start(override), /before init/);
+        assert.equal(calls.length, 0);
+    }
+});
