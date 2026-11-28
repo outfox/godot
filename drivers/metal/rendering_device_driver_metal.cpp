@@ -678,6 +678,12 @@ RDD::TextureID RenderingDeviceDriverMetal::external_texture_create(ExternalTextu
 	return TextureID(tex_info);
 }
 
+uint64_t RenderingDeviceDriverMetal::external_texture_get_memory_size(TextureID p_texture) {
+	TextureInfo *tex_info = (TextureInfo *)p_texture.id;
+	IOSurfaceRef surface = tex_info->texture.get()->iosurface();
+	return surface ? IOSurfaceGetAllocSize(surface) : 0;
+}
+
 uint64_t RenderingDeviceDriverMetal::texture_get_allocation_size(TextureID p_texture) {
 	TextureInfo *tex_info = (TextureInfo *)p_texture.id;
 	if (tex_info->rasterization_rate_map || tex_info->imported || tex_info->texture.get()->parentTexture() != nullptr) {

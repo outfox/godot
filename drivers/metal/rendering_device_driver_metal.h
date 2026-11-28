@@ -258,6 +258,7 @@ public:
 	// 2dog: external texture sharing (IOSurface-backed).
 	virtual uint32_t external_texture_supported_handle_types() override final;
 	virtual TextureID external_texture_create(ExternalTextureShareHandleType p_handle_type, DataFormat p_format, uint32_t p_width, uint32_t p_height, uint64_t p_import_handle, uint64_t *r_export_handle) override final;
+	virtual uint64_t external_texture_get_memory_size(TextureID p_texture) override final;
 	virtual uint64_t texture_get_allocation_size(TextureID p_texture) override final;
 	virtual void texture_get_copyable_layout(TextureID p_texture, const TextureSubresource &p_subresource, TextureCopyableLayout *r_layout) override final;
 	virtual Vector<uint8_t> texture_get_data(TextureID p_texture, uint32_t p_layer) override final;
