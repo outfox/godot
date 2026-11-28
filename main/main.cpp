@@ -1972,8 +1972,8 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 				}
 				// 2dog: record project paths explicitly; process CWD changes can race other engine instances.
 #ifdef UNIX_ENABLED
-				// getcwd() is canonical; simplify_path() would collapse "link/.." lexically, past the symlink.
-				project_path = OS::get_singleton()->get_cwd();
+				// simplify_path() would collapse "link/.." lexically, past the symlink; the OS resolves it as chdir did.
+				project_path = p.is_absolute_path() ? p : OS::get_singleton()->get_cwd();
 #else
 				String resolved = p.simplify_path();
 				project_path = resolved.is_absolute_path() ? resolved : OS::get_singleton()->get_cwd();
@@ -2015,7 +2015,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 			if (OS::get_singleton()->set_cwd(path) == OK) {
 				// 2dog: record the resolved project path (see --path above).
 #ifdef UNIX_ENABLED
-				project_path = OS::get_singleton()->get_cwd();
+				project_path = path.is_absolute_path() ? path : OS::get_singleton()->get_cwd();
 #else
 				String resolved = path.simplify_path();
 				project_path = resolved.is_absolute_path() ? resolved : OS::get_singleton()->get_cwd();
