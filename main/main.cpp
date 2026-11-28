@@ -1505,6 +1505,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 		} else if (arg == "--rendering-method") {
 			if (N) {
 				rendering_method = N->get();
+				rendering_method_source = OS::RenderingSource::RENDERING_SOURCE_COMMANDLINE;
 				N = N->next();
 			} else {
 				OS::get_singleton()->print("Missing renderer name argument, aborting.\n");
@@ -1970,8 +1971,13 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 					goto error;
 				}
 				// 2dog: record project paths explicitly; process CWD changes can race other engine instances.
+#ifdef UNIX_ENABLED
+				// simplify_path() would collapse "link/.." lexically, past the symlink; the OS resolves it as chdir did.
+				project_path = p.is_absolute_path() ? p : OS::get_singleton()->get_cwd();
+#else
 				String resolved = p.simplify_path();
 				project_path = resolved.is_absolute_path() ? resolved : OS::get_singleton()->get_cwd();
+#endif
 				N = N->next();
 			} else {
 				OS::get_singleton()->print("Missing relative or absolute path, aborting.\n");
@@ -2008,8 +2014,12 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 			}
 			if (OS::get_singleton()->set_cwd(path) == OK) {
 				// 2dog: record the resolved project path (see --path above).
+#ifdef UNIX_ENABLED
+				project_path = path.is_absolute_path() ? path : OS::get_singleton()->get_cwd();
+#else
 				String resolved = path.simplify_path();
 				project_path = resolved.is_absolute_path() ? resolved : OS::get_singleton()->get_cwd();
+#endif
 			} else {
 				project_path = path;
 			}
@@ -2070,6 +2080,13 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 			if (N) {
 				main_pack = N->get();
 				N = N->next();
+#ifdef WEB_ENABLED
+				// 2dog: a pack is reopened by its path for every file. A relative path fails while another thread's
+				// DirAccess has the working directory changed, so resolve it once, before any thread exists.
+				if (main_pack.is_relative_path()) {
+					main_pack = OS::get_singleton()->get_cwd().path_join(main_pack);
+				}
+#endif
 
 #if defined(ANDROID_ENABLED) && !defined(OVERRIDE_PATH_ENABLED)
 				// Validate that `main_pack` is located within the 'assets' directory.

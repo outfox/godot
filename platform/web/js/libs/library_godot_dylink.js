@@ -76,7 +76,7 @@ const GodotDylink = {
 		},
 
 		has: function (obj, name) {
-			return Object.prototype.hasOwnProperty.call(obj, name);
+			return Object.hasOwn(obj, name);
 		},
 
 		// 2dog: resolve symbols from wasm exports, imported JS library functions, or Module exports.
@@ -180,7 +180,7 @@ const GodotDylink = {
 			};
 
 			const layout = shared && shared.layout;
-			const memAlign = Math.pow(2, meta.memoryAlign);
+			const memAlign = 2 ** meta.memoryAlign;
 			let memoryBase = 0;
 			if (layout) {
 				// 2dog: the first loader allocated the data in shared memory; its start function initialized it once.
@@ -254,6 +254,7 @@ const GodotDylink = {
 						if (!meta.weak.has(sym)) {
 							unresolved.push(sym);
 						}
+						// eslint-disable-next-line no-loop-func
 						func = (...args) => {
 							const own = exports && exports[sym];
 							if (typeof own !== 'function') {

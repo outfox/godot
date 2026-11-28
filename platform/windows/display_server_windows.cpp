@@ -2376,9 +2376,14 @@ void DisplayServerWindows::window_set_current_screen(int p_screen, DisplayServer
 		Size2 size = screen_get_size(p_screen);
 		Vector2i off = (wd.multiwindow_fs || (!wd.fullscreen && wd.borderless && wd.maximized)) ? _get_screen_expand_offset(p_screen) : Vector2i();
 
-		ShowWindow(wd.hWnd, SW_RESTORE);
+		const bool keep_hidden = p_window == DisplayServerEnums::MAIN_WINDOW_ID && OS::get_singleton()->is_hidden_window(); // 2dog
+		if (!keep_hidden) {
+			ShowWindow(wd.hWnd, SW_RESTORE);
+		}
 		MoveWindow(wd.hWnd, pos.x, pos.y, size.width + off.x, size.height + off.y, TRUE);
-		ShowWindow(wd.hWnd, SW_MAXIMIZE);
+		if (!keep_hidden) {
+			ShowWindow(wd.hWnd, SW_MAXIMIZE);
+		}
 	} else {
 		Rect2i srect = screen_get_usable_rect(p_screen);
 		Point2i wpos = window_get_position(p_window) - screen_get_position(window_get_current_screen(p_window));
@@ -2793,6 +2798,14 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 		return;
 	}
 
+	// 2dog: --hidden-window keeps the main window hidden; only the stored mode state changes.
+	const bool keep_hidden = p_window == DisplayServerEnums::MAIN_WINDOW_ID && OS::get_singleton()->is_hidden_window();
+	auto show_window_cmd = [&](int p_cmd) {
+		if (!keep_hidden) {
+			ShowWindow(wd.hWnd, p_cmd);
+		}
+	};
+
 	bool was_fullscreen = wd.fullscreen;
 	wd.was_fullscreen_pre_min = false;
 
@@ -2836,7 +2849,7 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 			rect.bottom += GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CYCAPTION);
 		}
 
-		ShowWindow(wd.hWnd, SW_RESTORE);
+		show_window_cmd(SW_RESTORE);
 		MoveWindow(wd.hWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, TRUE);
 
 		if (restore_mouse_trails > 1) {
@@ -2856,18 +2869,18 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 			rect.bottom = wd.height;
 		}
 
-		ShowWindow(wd.hWnd, SW_RESTORE);
+		show_window_cmd(SW_RESTORE);
 		MoveWindow(wd.hWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, TRUE);
 	}
 
 	if (p_mode == DisplayServerEnums::WINDOW_MODE_WINDOWED) {
-		ShowWindow(wd.hWnd, SW_NORMAL);
+		show_window_cmd(SW_NORMAL);
 		wd.maximized = false;
 		wd.minimized = false;
 	}
 
 	if (p_mode == DisplayServerEnums::WINDOW_MODE_MAXIMIZED && !wd.borderless) {
-		ShowWindow(wd.hWnd, SW_MAXIMIZE);
+		show_window_cmd(SW_MAXIMIZE);
 		wd.maximized = true;
 		wd.minimized = false;
 	}
@@ -2878,7 +2891,7 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 			GetWindowRect(wd.hWnd, &wd.pre_fs_rect);
 			wd.pre_fs_valid = true;
 		}
-		ShowWindow(wd.hWnd, SW_NORMAL);
+		show_window_cmd(SW_NORMAL);
 		wd.maximized = true;
 		wd.minimized = false;
 
@@ -2890,7 +2903,7 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 	}
 
 	if (p_mode == DisplayServerEnums::WINDOW_MODE_MINIMIZED) {
-		ShowWindow(wd.hWnd, SW_MINIMIZE);
+		show_window_cmd(SW_MINIMIZE);
 		wd.maximized = false;
 		wd.minimized = true;
 		wd.was_fullscreen_pre_min = was_fullscreen;
@@ -2905,7 +2918,7 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 
 	if ((p_mode == DisplayServerEnums::WINDOW_MODE_FULLSCREEN || p_mode == DisplayServerEnums::WINDOW_MODE_EXCLUSIVE_FULLSCREEN) && !wd.fullscreen) {
 		if (wd.minimized || wd.maximized) {
-			ShowWindow(wd.hWnd, SW_RESTORE);
+			show_window_cmd(SW_RESTORE);
 		}
 
 		// Save previous maximized stare.
@@ -3000,7 +3013,9 @@ void DisplayServerWindows::window_set_flag(DisplayServerEnums::WindowFlags p_fla
 			}
 			_update_window_mouse_passthrough(p_window);
 			_update_window_style(p_window);
-			ShowWindow(wd.hWnd, (wd.no_focus || wd.is_popup) ? SW_SHOWNOACTIVATE : SW_SHOW); // Show the window.
+			if (p_window != DisplayServerEnums::MAIN_WINDOW_ID || !OS::get_singleton()->is_hidden_window()) { // 2dog: stay hidden.
+				ShowWindow(wd.hWnd, (wd.no_focus || wd.is_popup) ? SW_SHOWNOACTIVATE : SW_SHOW); // Show the window.
+			}
 		} break;
 		case DisplayServerEnums::WINDOW_FLAG_ALWAYS_ON_TOP: {
 			ERR_FAIL_COND_MSG(wd.transient_parent != DisplayServerEnums::INVALID_WINDOW_ID && p_enabled, "Transient windows can't become on top.");

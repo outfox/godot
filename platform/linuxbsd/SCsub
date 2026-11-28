@@ -49,6 +49,8 @@ if env["library_type"] == "static_library":
     )
     env.add_configuration_file("#bin/libgodot")
 elif env["library_type"] == "shared_library":
+    # 2dog: keep the standalone error callback object from the core archive in non-SCU builds.
+    env.AppendUnique(LINKFLAGS=["-Wl,-u,libgodot_set_error_callback"])
     prog = env.add_shared_library("#bin/godot", common_linuxbsd)
     env.add_configuration_file("#bin/libgodot")
 else:

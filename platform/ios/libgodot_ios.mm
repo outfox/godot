@@ -36,6 +36,8 @@
 #include "core/profiling/profiling.h"
 #import "drivers/apple_embedded/godot_app_delegate_service_apple_embedded.h"
 #import "drivers/apple_embedded/display_server_apple_embedded.h"
+#import "drivers/apple_embedded/godot_renderer.h"
+#import "drivers/apple_embedded/godot_view_apple_embedded.h"
 #import "drivers/apple_embedded/godot_view_controller.h"
 #import "drivers/apple_embedded/main_utilities.h"
 #include "main/main.h"
@@ -176,6 +178,7 @@ int libgodot_ios_create(int p_argc, char *p_argv[], GDExtensionInitializationFun
 	ERR_FAIL_COND_V_MSG(p_argc < 1 || p_argc > 60, (int)ERR_INVALID_PARAMETER, "libgodot_ios_create needs 1 to 60 arguments.");
 
 	CoreGlobals::global_init_func_libgodot = p_init_func;
+	CoreGlobals::engine_reinit_enabled = true;
 	CoreGlobals::libgodot_host_instance = true;
 
 	os = new OS_IOS();
@@ -269,6 +272,14 @@ void libgodot_ios_terminate(void) {
 		return;
 	}
 	remove_observers();
+	// 2dog: the display link or timer would keep drawing into the destroyed display server.
+	if (view_controller) {
+		safeDispatchSyncToMain(^{
+			if (view_controller.isViewLoaded) {
+				[view_controller.godotView stopRendering];
+			}
+		});
+	}
 	Main::cleanup();
 	godot_cleanup_profiler();
 	delete os;

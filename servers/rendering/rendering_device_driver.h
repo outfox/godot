@@ -335,6 +335,7 @@ public:
 	// 2dog: r_export_handle is exported for export types and echoed for import types.
 	virtual uint32_t external_texture_supported_handle_types() { return 0; }
 	virtual TextureID external_texture_create(ExternalTextureShareHandleType p_handle_type, DataFormat p_format, uint32_t p_width, uint32_t p_height, uint64_t p_import_handle, uint64_t *r_export_handle) { return TextureID(); }
+	virtual uint64_t external_texture_get_memory_size(TextureID p_texture) { return texture_get_allocation_size(p_texture); }
 	// Returns a texture layout for buffer <-> texture copies. If you are copying multiple texture subresources to/from the same buffer,
 	// you are responsible for correctly aligning the start offset for every buffer region. See API_TRAIT_TEXTURE_TRANSFER_ALIGNMENT.
 	virtual void texture_get_copyable_layout(TextureID p_texture, const TextureSubresource &p_subresource, TextureCopyableLayout *r_layout) = 0;
