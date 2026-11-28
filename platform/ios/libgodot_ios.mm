@@ -273,9 +273,11 @@ void libgodot_ios_terminate(void) {
 	}
 	remove_observers();
 	// 2dog: the display link or timer would keep drawing into the destroyed display server.
-	if (view_controller && view_controller.isViewLoaded) {
+	if (view_controller) {
 		safeDispatchSyncToMain(^{
-			[view_controller.godotView stopRendering];
+			if (view_controller.isViewLoaded) {
+				[view_controller.godotView stopRendering];
+			}
 		});
 	}
 	Main::cleanup();
