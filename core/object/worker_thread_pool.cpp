@@ -592,6 +592,13 @@ bool WorkerThreadPool::_handle_runlevel(ThreadData *p_thread_data, MutexLock<Bin
 				if (!task_queue.first() && !low_priority_task_queue.first()) {
 					p_thread_data->pre_exited_languages = true;
 					runlevel_data.pre_exit_languages.num_idle_threads++;
+					// 2dog: Wake workers that went to sleep while queued work still prevented them from reporting idle.
+					for (ThreadData &thread : threads) {
+						if (!thread.pre_exited_languages && !thread.signaled) {
+							thread.signaled = true;
+							thread.cond_var.notify_one();
+						}
+					}
 					control_cond_var.notify_all();
 				}
 			}
