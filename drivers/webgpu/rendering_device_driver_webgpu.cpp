@@ -834,6 +834,7 @@ RDD::BufferID RenderingDeviceDriverWebGPU::buffer_create(uint64_t p_size, BitFie
 	buf->usage = _buffer_usage_to_wgpu(p_usage);
 	buf->usage |= WGPUBufferUsage_CopyDst; // Always allow writes.
 	buf->size = aligned_size;
+	buf->requested_size = p_size;
 
 	// Don't add MapRead to generic CPU buffers — it conflicts with CopySrc.
 	// Compute readback uses buffer_get_data_direct() which creates its own
@@ -5322,7 +5323,7 @@ void RenderingDeviceDriverWebGPU::command_copy_buffer(CommandBufferID p_cmd_buff
 				vformat("WebGPU: buffer copy offsets must be multiples of 4 (src %d, dst %d); region skipped.", (int64_t)region.src_offset, (int64_t)region.dst_offset));
 		// 2dog: sizes are rounded up to 4 bytes. That is harmless in staging memory and in the padding at a buffer's
 		// end; anywhere else it would overwrite the bytes after the range, which no CPU copy could restore.
-		ERR_CONTINUE_MSG((region.size & 3ULL) && !dst->is_readback && !dst->shadow_map && region.dst_offset + region.size < dst->size,
+		ERR_CONTINUE_MSG((region.size & 3ULL) && !dst->is_readback && !dst->shadow_map && region.dst_offset + region.size < dst->requested_size,
 				vformat("WebGPU: buffer copy of %d bytes at offset %d is not a multiple of 4 bytes; region skipped.", (int64_t)region.size, (int64_t)region.dst_offset));
 		uint64_t size = (region.size + 3) & ~3ULL;
 		wgpuCommandEncoderCopyBufferToBuffer(cmd->encoder, src->handle, region.src_offset, dst->handle, region.dst_offset, size);

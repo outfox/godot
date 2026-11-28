@@ -46,6 +46,7 @@ using RDD = RenderingDeviceDriver;
 struct WGBuffer {
 	WGPUBuffer handle = nullptr;
 	uint64_t size = 0;
+	uint64_t requested_size = 0; // Before padding to 4 bytes.
 	WGPUBufferUsage usage = 0;
 	uint8_t *shadow_map = nullptr; // For CPU-side mapping emulation.
 	bool map_dirty = false;
